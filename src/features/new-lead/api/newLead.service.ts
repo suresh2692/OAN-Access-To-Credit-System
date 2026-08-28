@@ -1,20 +1,10 @@
-import { z } from 'zod';
+import {
+    addCreditInfoResponseSchema, creditInfoApiSchema, validateResponse, type AddCreditInfoResponse, type CreditInfoAPI, 
+} from '@/lib/api/api.schemas';
 import { fetchApi } from '@/lib/api/fetchApi';
 import { normalizeLeadId } from '@/lib/utils';
 import type { ApiResponse } from '@/types/api';
-import {
-  sendOtpAndCreateConsentResponseSchema,
-  verifyOtpResponseSchema,
-  submitConsentResponseSchema,
-  creditInfoApiSchema,
-  addCreditInfoResponseSchema,
-  validateResponse,
-  type SendOtpAndCreateConsentResponse,
-  type VerifyOtpResponse,
-  type SubmitConsentResponse,
-  type CreditInfoAPI,
-  type AddCreditInfoResponse
-} from '@/lib/api/api.schemas';
+import { z } from 'zod';
 
 export interface FarmerDetails {
   firstName: string;
@@ -33,6 +23,8 @@ export interface FarmerDetails {
   farmer_profile_created?: boolean | undefined;
   consent_request_status?: string | undefined;
   consent_request_otp_verified?: boolean | undefined;
+  consent_request_name?: string | undefined;
+  faydaId?: string | undefined;
 }
 
 export interface ConsentReason {
@@ -201,7 +193,9 @@ export interface BasicProfileBackendData {
     name?: string;
     status?: string;
     otp_verified?: boolean;
+    farmer_fayda_id?: string;
   };
+  fayda_id?: string;
 }
 
 const cleanId = (id: string): string => normalizeLeadId(id);
@@ -236,74 +230,12 @@ export const newLeadService = {
     throw new Error(`Farmer with Fayda ID '${faydaId}' not found.`);
   },
 
-  async sendOtpAndCreateConsent(data: { farmerId: string; leadId?: string }): Promise<SendOtpAndCreateConsentResponse> {
-    const cleanLeadId = data.leadId ? cleanId(data.leadId) : '';
-    const payload = {
-      lead_id: cleanLeadId,
-      fayda_id: data.farmerId,
-    };
-    const response = await fetchApi('oan_a2c.api.v1.consent.api.request_otp', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }) as ApiResponse<SendOtpAndCreateConsentResponse>;
-    return validateResponse(sendOtpAndCreateConsentResponseSchema, response.data, 'consent.request_otp');
-  },
-
-  async verifyOtp(data: { leadId?: string; consent_request: string; otp_code: string }): Promise<VerifyOtpResponse> {
-    if (!data.leadId) {
-      throw new Error('leadId is required for OTP verification');
-    }
-    const cleanLeadId = cleanId(data.leadId);
-    const response = await fetchApi('oan_a2c.api.v1.consent.api.verify_otp', {
-      method: 'POST',
-      body: JSON.stringify({
-        lead_id: cleanLeadId,
-        consent_request: data.consent_request,
-        otp_code: data.otp_code
-      }),
-    }) as ApiResponse<VerifyOtpResponse>;
-    return validateResponse(verifyOtpResponseSchema, response.data, 'consent.verify_otp');
-  },
-
-  async submitConsent(data: {
-    lead_id: string;
-    consent_request: string;
-    consent_type?: string | undefined;
-    consent_reason_id?: number | undefined;
-    validity_months?: number | undefined;
-    consent_form_filename: string;
-    consent_form_base64: string;
-    allowed_data_field_ids?: (number | string)[] | undefined;
-  }): Promise<SubmitConsentResponse> {
-    const cleanLeadId = cleanId(data.lead_id);
-    const response = await fetchApi('oan_a2c.api.v1.consent.api.submit_consent', {
-      method: 'POST',
-      body: JSON.stringify({
-        ...data,
-        lead_id: cleanLeadId,
-      }),
-    }) as ApiResponse<SubmitConsentResponse>;
-    return validateResponse(submitConsentResponseSchema, response.data, 'consent.submit_consent');
-  },
-
-  async get_consent_reasons(): Promise<ConsentReason[]> {
-    const response = await fetchApi('oan_a2c.api.v1.consent.api.get_consent_reasons', {
-      method: 'GET',
-    }) as ApiResponse<ConsentReason[]>;
-    return response.data;
-  },
-
-  async get_consent_allowed_fields(): Promise<AllowedDataField[]> {
-    const response = await fetchApi('oan_a2c.api.v1.consent.api.get_consent_allowed_fields', {
-      method: 'GET',
-    }) as ApiResponse<AllowedDataField[]>;
-    return response.data;
-  },
 
   // Fetch basic details of a consent_request (farmer details, etc.)
-  async getLeadDetails(leadId: string): Promise<FarmerDetails> {
-    const cleanLeadId = cleanId(leadId);
-    const response = await fetchApi(`oan_a2c.api.v1.loan_applications.get_basic_profile?lead_id=${cleanLeadId}&include_consent_data=1`) as ApiResponse<
+  async getLeadDetails(leadId?: string, signal?: AbortSignal): Promise<FarmerDetails> {
+    const query = leadId ? `?lead_id=${cleanId(leadId)}&include_consent_data=1` : '?include_consent_data=1';
+    const fetchInit = signal ? { signal } : {};
+    const response = await fetchApi(`oan_a2c.api.v1.loan_applications.get_basic_profile${query}`, fetchInit) as ApiResponse<
       BasicProfileBackendData | null
     >;
 
@@ -334,7 +266,9 @@ export const newLeadService = {
       requested_data_fields: lead.requested_data_fields ?? [],
       farmer_profile_created: lead.farmer_profile_created,
       consent_request_status: lead.consent_request?.status,
-      consent_request_otp_verified: lead.consent_request?.otp_verified
+      consent_request_otp_verified: lead.consent_request?.otp_verified,
+      consent_request_name: lead.consent_request?.name,
+      faydaId: lead.fayda_id ?? lead.consent_request?.farmer_fayda_id ?? ''
     };
   },
 
@@ -374,7 +308,7 @@ export const newLeadService = {
   },
 
   // Add credit information for a lead
-  async addCreditInfo(data: { lead_id: string; loan_type: string; loan_amount: number; purpose_message?: string }): Promise<AddCreditInfoResponse> {
+  async addCreditInfo(data: { lead_id: string; loan_type?: string; loan_product?: string; loan_amount: number; purpose_message?: string }): Promise<AddCreditInfoResponse> {
     const response = await fetchApi('oan_a2c.api.v1.leads.add_lead_credit_info', {
       method: 'POST',
       body: JSON.stringify(data),

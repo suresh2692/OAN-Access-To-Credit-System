@@ -1,22 +1,21 @@
 'use client';
 
-import { logger } from '@/lib/logger';
-import React, { useState, useEffect } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
-import { nextStepAPI, prevStepAPI, setFormData as setFormDataAction } from '@/features/new-loan/store/newLoanFormSlice';
-import { ArrowLeft, ArrowRight, Check, Loader2, Eye, EyeOff } from 'lucide-react';
-import { TextField } from '@/components/ui/TextField';
-import { maskSensitiveId } from '@/lib/utils';
 import { SelectField } from '@/components/ui/SelectField';
-import { GENDER_OPTIONS } from '@/features/loans/constants/loans.constants';
+import { TextField } from '@/components/ui/TextField';
+// eslint-disable-next-line boundaries/dependencies -- TODO (2026-08-23): needs to be fixed later; hiding for now as this existed before our changes
 import { loanService } from '@/features/loans/api/loan.service';
-import type { AppDispatch, RootState } from '@/store';
-import { 
-  FORM_SECTIONS, 
-  DEFAULT_FARMER_DETAILS, 
-  mapApiToFarmerDetails, 
-  type FarmerDetails 
+import {
+  DEFAULT_FARMER_DETAILS, FORM_SECTIONS, mapApiToFarmerDetails,
+  type FarmerDetails
+  // eslint-disable-next-line boundaries/dependencies -- TODO (2026-08-23): needs to be fixed later; hiding for now as this existed before our changes
 } from '@/features/loans/constants/form-sections';
+import { nextStepAPI, prevStepAPI, setFormData as setFormDataAction } from '@/features/new-loan/store/newLoanFormSlice';
+import { logger } from '@/lib/logger';
+import { maskSensitiveId } from '@/lib/utils';
+import type { AppDispatch, RootState } from '@/store';
+import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
 
 
 export function Step2FarmerDetails() {
@@ -77,7 +76,7 @@ export function Step2FarmerDetails() {
   return (
     <form onSubmit={handleSubmit} className="animate-in fade-in slide-in-from-right-8 duration-500 space-y-6">
       {FORM_SECTIONS.map((section, sectionIdx) => (
-        <div key={section.title} className="rounded-xl border border-gray-200 bg-white p-4 sm:p-6 shadow-sm relative">
+        <div key={section.title} className="rounded-xl bg-white p-4 sm:p-6 shadow-sm relative border border-[#F1F3F4] rounded-xl shadow-[0px_4px_6px_-1px_rgba(0,0,0,0.05),0px_2px_4px_-1px_rgba(0,0,0,0.03)] hover:-translate-y-1 hover:shadow-lg transition-all duration-300 ">
           {sectionIdx === 0 && isLoadingProfile && (
             <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-10 rounded-xl">
               <Loader2 className="h-6 w-6 animate-spin text-[#16335A]" />
@@ -158,7 +157,7 @@ export function Step2FarmerDetails() {
       ))}
 
       {/* Bottom Actions */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between rounded-xl border border-gray-200 bg-white px-4 sm:px-6 py-6 shadow-sm mt-8 relative z-0 gap-6 sm:gap-0">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between bg-white px-4 sm:px-6 py-6 shadow-sm mt-8 relative z-0 gap-6 sm:gap-0 border border-[#F1F3F4] rounded-xl shadow-[0px_4px_6px_-1px_rgba(0,0,0,0.05),0px_2px_4px_-1px_rgba(0,0,0,0.03)] hover:-translate-y-1 hover:shadow-lg transition-all duration-300 ">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 sm:gap-6">
           <div className="flex items-center justify-center sm:justify-start gap-2 text-[15px] font-normal text-[#16335A]">
             <Check className="h-5 w-5 text-[#16335A]" /> Your progress is saved automatically

@@ -1,7 +1,7 @@
-import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import { newLeadService, AssignableUserAPI, AssignLeadResponse } from '../api/newLead.service';
-import { initializeLead, clearForm } from './actions';
 import type { RootState } from '@/store';
+import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
+import { AssignableUserAPI, AssignLeadResponse, newLeadService } from '../api/newLead.service';
+import { clearForm, initializeLead } from './actions';
 
 interface Assignment {
   agentId: string;

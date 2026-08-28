@@ -1,18 +1,23 @@
 'use client';
 
-import { useState } from 'react';
-import { User, FileText, Calendar, Download, LayoutDashboard, Check } from 'lucide-react';
-import { useRouter } from 'next/navigation';
-import { useSelector, useDispatch } from 'react-redux';
+// eslint-disable-next-line boundaries/dependencies -- TODO (2026-08-23): needs to be fixed later; hiding for now as this existed before our changes
+import { LoanTableRow } from '@/features/loans/components/LoanTable';
+// eslint-disable-next-line boundaries/dependencies -- TODO (2026-08-23): needs to be fixed later; hiding for now as this existed before our changes
+import LoanApplicationModal from '@/features/loans/components/modals/LoanApplicationModalLegacy';
 import { resetForm } from '@/features/new-loan/store/newLoanFormSlice';
 import type { RootState } from '@/store';
-import LoanApplicationModal from '@/features/loans/components/modals/LoanApplicationModal';
-import { LoanTableRow } from '@/features/loans/components/LoanTable';
+import { Calendar, Check, Download, FileText, LayoutDashboard, User } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
 
 export function Step4Success() {
   const router = useRouter();
   const dispatch = useDispatch();
   const [showSummaryPopup, setShowSummaryPopup] = useState(false);
+  // Captured once (lazy initializer) rather than called directly in the render
+  // body, where Date.now() would return a new value on every re-render.
+  const [submittedAt] = useState(() => Date.now());
   const formData = useSelector((state: RootState) => state.loanForm.formData);
   const applicationId = useSelector((state: RootState) => state.loanForm.applicationId);
 
@@ -41,7 +46,7 @@ export function Step4Success() {
     loanTerm: formData.duration || "—",
     loanAmount: formData.requestedAmount ? `ETB ${parseFloat(formData.requestedAmount).toLocaleString()}` : "—",
     action: "view",
-    timestamp: Date.now(),
+    timestamp: submittedAt,
   };
 
   const handleReturnToDashboard = () => {

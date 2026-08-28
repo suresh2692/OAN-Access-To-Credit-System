@@ -1,12 +1,13 @@
 "use client";
 import { logger } from '@/lib/logger';
 
-import { ReactNode, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
-import { useAppDispatch } from '@/store/hooks';
-import { clearForm, submitNewLeadThunk } from '@/features/new-lead/store/newLeadSlice';
 import { FeedbackModal } from '@/components/ui/FeedbackModal';
+// eslint-disable-next-line boundaries/dependencies -- TODO (2026-08-23): needs to be fixed later; hiding for now as this existed before our changes
+import { clearForm, submitNewLeadThunk } from '@/features/new-lead/store/newLeadSlice';
+import { useAppDispatch } from '@/store/hooks';
+import { ArrowLeft } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ReactNode, useState } from 'react';
 
 interface LeadLayoutGridProps {
     children: ReactNode;
@@ -47,8 +48,8 @@ export function LeadLayoutGrid({ children, sidebar, titleBanner, isViewMode = fa
     };
 
     return (
-        <main className="flex flex-col items-start flex-1 w-full">
-            <div className="flex flex-col items-start gap-6 w-full">
+        <main className="flex flex-col items-start flex-1 w-full min-w-0">
+            <div className="flex flex-col items-start gap-6 w-full min-w-0">
                 {/* Breadcrumb Nav */}
                 <div className="flex flex-col items-start gap-4 w-full">
                     <button
@@ -64,7 +65,7 @@ export function LeadLayoutGrid({ children, sidebar, titleBanner, isViewMode = fa
                 {titleBanner}
 
                 {/* Main 2-Column Grid */}
-                <div className="flex flex-col-reverse lg:flex-row items-start gap-6 w-full">
+                <div className="flex flex-col-reverse lg:flex-row items-start gap-6 w-full min-w-0">
 
                     {/* Left Column (Forms) */}
                     <form onSubmit={handleSubmit} className="flex flex-col items-start gap-6 flex-1 w-full min-w-0">
@@ -93,7 +94,7 @@ export function LeadLayoutGrid({ children, sidebar, titleBanner, isViewMode = fa
 
                     {/* Right Column (Sidebar Cards) */}
                     {sidebar && (
-                        <div className="flex flex-col items-start gap-6 w-full lg:w-[314px] shrink-0 lg:sticky lg:top-6 font-semibold">
+                        <div className="flex flex-col items-start gap-6 w-full lg:w-[314px] shrink-0 lg:sticky lg:top-6 font-semibold min-w-0">
                             {sidebar}
                         </div>
                     )}

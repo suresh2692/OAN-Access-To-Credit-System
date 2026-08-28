@@ -1,25 +1,88 @@
 "use client";
 import { logger } from '@/lib/logger';
 
-import { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import { Portal } from '@/components/Portal';
 import { SelectField } from '@/components/ui/SelectField';
+import { X } from 'lucide-react';
+import { useId, useState } from 'react';
 
 import { DatePickerField } from '@/components/ui/DatePickerField';
-import { TimePickerField } from '@/components/ui/TimePickerField';
-import { useAppDispatch, useAppSelector } from '@/store/hooks';
-import { scheduleVisitThunk, selectVisitState } from '../..';
-import { useParams, useRouter } from 'next/navigation';
-import { normalizeLeadId } from '@/lib/utils';
 import { FeedbackModal } from '@/components/ui/FeedbackModal';
+import { TimePickerField } from '@/components/ui/TimePickerField';
+import { useModalA11y } from '@/hooks/useModalA11y';
+import { normalizeLeadId } from '@/lib/utils';
+import { useAppDispatch, useAppSelector } from '@/store/hooks';
+import { useParams, useRouter } from 'next/navigation';
+import { scheduleVisitThunk, selectVisitState } from '../..';
+
+export interface VisitScheduleDetails {
+  date: string;
+  time: string;
+  location: string;
+  agenda: string;
+  region: string;
+  zone: string;
+  woreda: string;
+  kebele: string;
+}
 
 interface ScheduleNewVisitFormProps {
   asModal?: boolean;
   isOpen?: boolean;
   onClose?: () => void;
-  onSave?: (scheduleDetails: any) => void | Promise<void>;
+  onSave?: (scheduleDetails: VisitScheduleDetails) => void | Promise<void>;
 }
+
+const isTodayDate = (dateStr: string): boolean => {
+  if (!dateStr) return false;
+  const selected = new Date(dateStr);
+  const today = new Date();
+  return (
+    selected.getFullYear() === today.getFullYear() &&
+    selected.getMonth() === today.getMonth() &&
+    selected.getDate() === today.getDate()
+  );
+};
+
+const isPastTimeForToday = (dateStr: string, timeStr: string): boolean => {
+  if (!dateStr || !timeStr || !isTodayDate(dateStr)) return false;
+
+  let hours = 0;
+  let minutes = 0;
+  const match12 = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (match12 && match12[1] && match12[2] && match12[3]) {
+    let h = parseInt(match12[1], 10);
+    const m = parseInt(match12[2], 10);
+    const period = match12[3].toUpperCase();
+    if (period === 'PM' && h < 12) h += 12;
+    if (period === 'AM' && h === 12) h = 0;
+    hours = h;
+    minutes = m;
+  } else {
+    const match24 = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+    if (match24 && match24[1] && match24[2]) {
+      hours = parseInt(match24[1], 10);
+      minutes = parseInt(match24[2], 10);
+    } else {
+      return false;
+    }
+  }
+
+  const now = new Date();
+  const visitTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes);
+  return visitTime.getTime() < now.getTime();
+};
+
+/**
+ * Keeps a prefilled value selectable.
+ *
+ * The four location lists below are still hardcoded, so a visit saved against
+ * any other place would render its value (SelectField shows `value` whether or
+ * not it is an option) but vanish from the list the moment the agent opened it —
+ * leaving no way to pick it back after changing their mind.
+ */
+const withCurrent = (options: string[], value: string): string[] =>
+  value && !options.includes(value) ? [...options, value] : options;
 
 export const ScheduleNewVisitForm = ({
   asModal = false,
@@ -28,43 +91,97 @@ export const ScheduleNewVisitForm = ({
   onSave
 }: ScheduleNewVisitFormProps) => {
   const { visitSchedule } = useAppSelector(selectVisitState);
-
-  const [date, setDate] = useState(visitSchedule?.date || '');
-  const [time, setTime] = useState('');
-  const [location] = useState('');
-  const [agenda, setAgenda] = useState('');
-  const [region, setRegion] = useState('');
-  const [zone, setZone] = useState('');
-  const [woreda, setWoreda] = useState('');
-  const [kebele, setKebele] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  const [errorFeedback, setErrorFeedback] = useState<string | null>(null);
-
-  const [mounted, setMounted] = useState(false);
   const dispatch = useAppDispatch();
   const params = useParams();
   const router = useRouter();
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const routeLeadId = normalizeLeadId(params?.id as string | undefined);
 
-  useEffect(() => {
-    if (asModal && isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
+  // Only the visit belonging to the lead on screen may seed this form.
+  //
+  // The store keeps a single `visitSchedule`, so between leaving one lead and
+  // `get_visit_schedules` answering for the next it still holds the previous
+  // lead's visit — and seeding from that put another farmer's date, time and
+  // meeting point on the form until the fetch landed. A schedule that does not
+  // name its lead (the inline date picker on the lead card writes one) is still
+  // accepted, so nothing regresses where the lead was never recorded.
+  const seed =
+    visitSchedule &&
+      (!visitSchedule.leadId || !routeLeadId || normalizeLeadId(visitSchedule.leadId) === routeLeadId)
+      ? visitSchedule
+      : null;
+
+  // Seeded from the visit already on the lead, so Reschedule reopens the place
+  // and time that were chosen the first time round instead of an empty form.
+  const [date, setDate] = useState(seed?.date || '');
+  const [time, setTime] = useState(seed?.time || '');
+  // The raw meeting point, not visitSchedule.location — that one falls back to
+  // 'Region, Zone' for the card, and saving it here would write that synthesised
+  // display string into meeting_location on every reschedule.
+  const [location, setLocation] = useState(seed?.meetingLocation || '');
+  const [agenda, setAgenda] = useState('');
+  const [region, setRegion] = useState(seed?.region || '');
+  const [zone, setZone] = useState(seed?.zone || '');
+  const [woreda, setWoreda] = useState(seed?.woreda || '');
+  const [kebele, setKebele] = useState(seed?.kebele || '');
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorFeedback, setErrorFeedback] = useState<string | null>(null);
+  // Set by the agent's first edit. Anything typed after that outranks a schedule
+  // that is still in flight — see the reseed below.
+  const [isDirty, setIsDirty] = useState(false);
+
+  // Reseed when a different visit becomes the active one.
+  //
+  // The modal opens with the schedule already in the store, so the initialisers
+  // above are enough there. The inline form on /leads/[id]/schedule is not —
+  // it mounts before `get_visit_schedules` answers, so it initialises against an
+  // empty store and would otherwise leave the agent retyping a place the server
+  // already knows.
+  //
+  // Adjusted during render rather than in an effect: an effect would cost a
+  // second render pass on every load, and keying off the schedule's identity
+  // means an unrelated re-render can never overwrite an edit in progress.
+  const [seededScheduleId, setSeededScheduleId] = useState(seed?.id ?? null);
+  if ((seed?.id ?? null) !== seededScheduleId) {
+    setSeededScheduleId(seed?.id ?? null);
+    // That fetch can resolve when the agent is already several fields into the
+    // form, and prefilling is only worth having on a form nobody has touched.
+    // Once dirty, an arriving schedule updates the identity being tracked and
+    // nothing else, so the agent's own typing is never overwritten.
+    if (!isDirty) {
+      setDate(seed?.date || '');
+      setTime(seed?.time || '');
+      setLocation(seed?.meetingLocation || '');
+      setRegion(seed?.region || '');
+      setZone(seed?.zone || '');
+      setWoreda(seed?.woreda || '');
+      setKebele(seed?.kebele || '');
     }
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [asModal, isOpen]);
+  }
+
+  // Every field writes through this, so the reseed above can tell an untouched
+  // form from one the agent is part-way through filling in.
+  const edited = <T,>(set: (value: T) => void) => (value: T) => {
+    setIsDirty(true);
+    set(value);
+  };
+
+  const dialogRef = useModalA11y<HTMLDivElement>(asModal && isOpen, () => onClose?.());
+  const dialogTitleId = useId();
+
+  // Body scroll lock is handled by useModalA11y (ref-counted so a stacked
+  // modal underneath this one isn't unlocked prematurely).
 
   if (asModal && !isOpen) return null;
 
   const handleSave = async () => {
     if (!date || !woreda) {
       setErrorFeedback('Please fill in all required fields (Date, Woreda).');
+      return;
+    }
+
+    if (isPastTimeForToday(date, time)) {
+      setErrorFeedback('Cannot schedule a visit for a past time on today\'s date. Please select a future time.');
       return;
     }
 
@@ -87,18 +204,20 @@ export const ScheduleNewVisitForm = ({
         // Redirect back to lead details page
         router.push(`/leads/${normalizeLeadId(activeLeadId)}`);
       }
-    } catch (err: any) {
+    } catch (err) {
       logger.error("Failed to save schedule:", err);
-      setErrorFeedback(typeof err === 'string' ? err : err.message || 'Failed to save schedule');
+      setErrorFeedback(typeof err === 'string' ? err : (err instanceof Error && err.message) || 'Failed to save schedule');
     } finally {
       setIsSaving(false);
     }
   };
 
-  const FormInner = () => (
+  const isPastTimeError = isPastTimeForToday(date, time);
+
+  const formContent = (
     <>
       <div className={`flex flex-row items-center w-full px-6 py-[19.5px] border-b border-[#E5E7EB] ${asModal ? 'justify-between' : ''}`}>
-        <h2 className="font-roboto font-semibold text-lg leading-6 text-[#111827]">
+        <h2 id={asModal ? dialogTitleId : undefined} className="font-roboto font-semibold text-lg leading-6 text-[#111827]">
           {asModal ? 'Schedule Visit' : 'Schedule New Visit'}
         </h2>
         {asModal && onClose && (
@@ -120,7 +239,7 @@ export const ScheduleNewVisitForm = ({
               <DatePickerField
                 label="Visit Date"
                 value={date}
-                onChange={setDate}
+                onChange={edited(setDate)}
                 minDate={new Date(new Date().setHours(0, 0, 0, 0))}
                 required
               />
@@ -129,7 +248,8 @@ export const ScheduleNewVisitForm = ({
               <TimePickerField
                 label="Visit Time"
                 value={time}
-                onChange={setTime}
+                onChange={edited(setTime)}
+                {...(isPastTimeError ? { error: 'Visit time cannot be in the past' } : {})}
                 required
               />
             </div>
@@ -142,8 +262,8 @@ export const ScheduleNewVisitForm = ({
               placeholder="What is the purpose of this visit?"
               rows={4}
               value={agenda}
-              onChange={(e) => setAgenda(e.target.value)}
-              className="w-full px-3 py-2 bg-white border border-[#D1D5DC] rounded-md text-sm text-[#111827] placeholder:text-[#9CA3AF] focus:outline-none focus:ring-1 focus:ring-[#3B82F6] focus:border-[#3B82F6] resize-none"
+              onChange={(e) => edited(setAgenda)(e.target.value)}
+              className="w-full px-3 py-2 bg-white border border-[#16A34A] rounded-md text-sm text-[#111827] placeholder:text-[#9CA3AF] focus:outline-none focus:ring-1 focus:ring-[#16A34A] focus:border-[#16A34A] resize-none"
             />
           </div>
 
@@ -153,9 +273,9 @@ export const ScheduleNewVisitForm = ({
               <SelectField
                 label="Region"
                 placeholder="Select Region"
-                options={['Oromia', 'Amhara']}
+                options={withCurrent(['Oromia', 'Amhara'], region)}
                 value={region}
-                onChange={setRegion}
+                onChange={edited(setRegion)}
                 required
               />
             </div>
@@ -163,9 +283,9 @@ export const ScheduleNewVisitForm = ({
               <SelectField
                 label="Zone"
                 placeholder="Select Zone"
-                options={['Jimma']}
+                options={withCurrent(['Jimma'], zone)}
                 value={zone}
-                onChange={setZone}
+                onChange={edited(setZone)}
                 required
               />
             </div>
@@ -177,9 +297,9 @@ export const ScheduleNewVisitForm = ({
               <SelectField
                 label="Woreda"
                 placeholder="Select Woreda"
-                options={['Limmu Kosa']}
+                options={withCurrent(['Limmu Kosa'], woreda)}
                 value={woreda}
-                onChange={setWoreda}
+                onChange={edited(setWoreda)}
                 required
               />
             </div>
@@ -187,9 +307,9 @@ export const ScheduleNewVisitForm = ({
               <SelectField
                 label="Kebele"
                 placeholder="Select Kebele"
-                options={['Kebele 1']}
+                options={withCurrent(['Kebele 1'], kebele)}
                 value={kebele}
-                onChange={setKebele}
+                onChange={edited(setKebele)}
                 required
               />
             </div>
@@ -207,7 +327,7 @@ export const ScheduleNewVisitForm = ({
           </button>
           <button
             onClick={handleSave}
-            disabled={isSaving}
+            disabled={isSaving || isPastTimeError}
             className="flex justify-center items-center px-4 py-3 bg-[#16A34A] rounded-md text-white font-inter font-semibold text-sm shadow-[0px_1px_2px_rgba(0,0,0,0.05)] hover:bg-[#15803d] transition-colors disabled:opacity-50"
           >
             {isSaving ? 'Saving...' : 'Save Schedule'}
@@ -226,27 +346,33 @@ export const ScheduleNewVisitForm = ({
   );
 
   if (asModal) {
-    if (!mounted || !isOpen) return null;
-    return createPortal(
-      <div
-        className="fixed inset-0 z-[9999] bg-black/40 backdrop-blur-[2px] flex items-center justify-center p-4"
-        onClick={onClose}
-      >
+    if (!isOpen) return null;
+    return (
+      <Portal>
         <div
-          className="relative flex flex-col items-start p-0 w-[95%] sm:w-[640px] max-w-full h-auto bg-white rounded-[10px] shadow-xl overflow-hidden"
-          onClick={(e) => e.stopPropagation()}
+          className="fixed inset-0 z-[9999] bg-black/40 backdrop-blur-[2px] flex items-center justify-center p-4"
+          onClick={onClose}
         >
-          <FormInner />
+          <div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={dialogTitleId}
+            tabIndex={-1}
+            className="relative flex flex-col items-start p-0 w-[95%] sm:w-[640px] max-w-full h-auto bg-white rounded-[10px] shadow-xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {formContent}
+          </div>
         </div>
-      </div>,
-      document.body
+      </Portal>
     );
   }
 
   // Default inline view
   return (
     <div className="flex flex-col items-start w-full bg-white border border-[#F1F3F4] shadow-[0px_4px_6px_-1px_rgba(0,0,0,0.05),0px_2px_4px_-1px_rgba(0,0,0,0.03)] hover:-translate-y-1 hover:shadow-lg transition-all duration-300 rounded-xl overflow-hidden">
-      <FormInner />
+      {formContent}
     </div>
   );
 };

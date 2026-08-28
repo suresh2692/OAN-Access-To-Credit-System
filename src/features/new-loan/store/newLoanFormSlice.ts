@@ -1,9 +1,12 @@
-import { logger } from '@/lib/logger';
-import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
+// eslint-disable-next-line boundaries/dependencies -- TODO (2026-08-23): needs to be fixed later; hiding for now as this existed before our changes
 import { loanService, type LoanApplicationSummary } from '@/features/loans/api/loan.service';
-import { newLeadService } from '@/features/new-lead/api/newLead.service';
-import type { RootState } from '../../../store';
+// eslint-disable-next-line boundaries/dependencies -- TODO (2026-08-23): needs to be fixed later; hiding for now as this existed before our changes
+import { consentService } from '@/features/consent/api/consent.service';
+import type { VerifyOtpResponse } from '@/lib/api/api.schemas';
+import { logger } from '@/lib/logger';
 import { normalizeLeadId } from '@/lib/utils';
+import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
+import type { RootState } from '../../../store';
 
 // Highest reachable form step (steps 1–3); step 4 is the post-submit success view.
 const MAX_FORM_STEP = 3;
@@ -52,12 +55,15 @@ const loadInitialState = (): LoanFormState => {
         const parsed = JSON.parse(saved);
         return {
           ...parsed,
+          // Never trust a persisted consent/OTP state — always re-verify after a reload.
+          consentRequestData: null,
+          otpVerified: false,
           loadingStates: { createApp: false, sendOtp: false, verifyOtp: false, uploadDoc: false, submitApp: false, fetchApp: false },
           errors: {},
           loadedSteps: parsed.loadedSteps || {},
           supportingDocs: parsed.supportingDocs || []
         };
-      } catch (e) {
+      } catch {
         logger.error('Failed to parse saved loan form state');
       }
     }
@@ -198,7 +204,7 @@ export const sendOtpAPI = createAsyncThunk(
   'loanForm/sendOtp',
   async (payload: { farmerId: string; leadId?: string }, { rejectWithValue }) => {
     try {
-      const response = await newLeadService.sendOtpAndCreateConsent(payload);
+      const response = await consentService.sendOtpAndCreateConsent(payload);
       return response;
     } catch (err) {
       return rejectWithValue(err instanceof Error ? err.message : 'Failed to send OTP');
@@ -207,7 +213,7 @@ export const sendOtpAPI = createAsyncThunk(
 );
 
 export const verifyOtpAPI = createAsyncThunk<
-  any,
+  VerifyOtpResponse,
   { leadId?: string; otp_code: string },
   { state: RootState }
 >(
@@ -219,7 +225,7 @@ export const verifyOtpAPI = createAsyncThunk<
       if (!consentRequest) {
         throw new Error('No active consent request found. Please request OTP again.');
       }
-      const response = await newLeadService.verifyOtp({
+      const response = await consentService.verifyOtp({
         ...(payload.leadId ? { leadId: payload.leadId } : {}),
         consent_request: consentRequest,
         otp_code: payload.otp_code

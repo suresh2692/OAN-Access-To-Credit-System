@@ -1,20 +1,18 @@
-// Centralized, eagerly-validated server environment configuration.
-//
-// Formatted and verified at module load to ensure any missing or invalid
-// variable fails immediately with a clear message instead of surfacing
-// as an opaque runtime error on the first API request.
-const apiBaseUrl = process.env.API_BASE_URL;
-
-if (!apiBaseUrl) {
-  throw new Error('[env] Missing required environment variable: API_BASE_URL');
-}
-
-try {
-  new URL(apiBaseUrl);
-} catch {
-  throw new Error(`[env] Invalid environment configuration: API_BASE_URL must be a valid URL (got "${apiBaseUrl}")`);
-}
-
+// Centralized server environment configuration.
+// Validation runs on first access (not at module load) so `next build` can
+// collect page data without the URL present. At runtime the first API request
+// will throw immediately with a clear message if the variable is missing.
 export const env = {
-  API_BASE_URL: apiBaseUrl.replace(/\/+$/, ''),
+  get API_BASE_URL(): string {
+    const val = process.env.API_BASE_URL;
+    if (!val) {
+      throw new Error('[env] Missing required environment variable: API_BASE_URL');
+    }
+    try {
+      new URL(val);
+    } catch {
+      throw new Error(`[env] Invalid environment configuration: API_BASE_URL must be a valid URL (got "${val}")`);
+    }
+    return val.replace(/\/+$/, '');
+  },
 };

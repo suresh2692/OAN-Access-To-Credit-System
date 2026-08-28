@@ -1,27 +1,24 @@
+import { AUTH_MESSAGES } from '@/lib/authMessages';
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { loginUser, getMe } from '../api/authApi';
 import type { RootState } from '../../../store';
-import type { User, AuthState } from '../types/auth.types';
+import { getMe, loginUser } from '../api/authApi';
+import { classifyUser, type AuthState, type LoginOutcome, type User } from '../types/auth.types';
 
 export const loginThunk = createAsyncThunk<
-  User,
-  { usr: string; pwd: string },
+  LoginOutcome,
+  { usr: string; pwd: string; rememberMe?: boolean },
   { rejectValue: string }
 >(
   'auth/login',
-  async ({ usr, pwd }, { rejectWithValue }) => {
+  async ({ usr, pwd, rememberMe = false }, { rejectWithValue }) => {
     try {
-      const loginData = await loginUser({ usr, pwd });
-
-      return {
-        username: loginData.email,
-        officerName: loginData.full_name || usr,
-        roles: Array.isArray(loginData.roles) ? loginData.roles : [],
-        mobileNo: null,
-        userType: null,
-      };
+      const result = await loginUser({ usr, pwd, rememberMe });
+      if (result.outcome === 'password_change_required') {
+        return { outcome: 'password_change_required', usr: result.usr };
+      }
+      return { outcome: 'authenticated', user: classifyUser(result.user) };
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Unknown Cause. Please Try Again Later';
+      const message = err instanceof Error ? err.message : AUTH_MESSAGES.unexpected;
       return rejectWithValue(message);
     }
   },
@@ -35,16 +32,10 @@ export const getMeThunk = createAsyncThunk<
   'auth/getMe',
   async (_, { rejectWithValue }) => {
     try {
-      const userData = await getMe();
-      return {
-        username: userData.email,
-        officerName: userData.full_name || '',
-        roles: Array.isArray(userData.roles) ? userData.roles : [],
-        mobileNo: null,
-        userType: null,
-      };
+      const raw = await getMe();
+      return classifyUser(raw);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to fetch current user session';
+      const message = err instanceof Error ? err.message : AUTH_MESSAGES.sessionExpired;
       return rejectWithValue(message);
     }
   },
@@ -69,8 +60,18 @@ const authSlice = createSlice({
       state.status = 'idle';
       state.error = null;
     },
+    setBankStatus(state, action: PayloadAction<'In Review' | 'Active' | 'Suspended'>) {
+      if (state.user?.kind === 'bank_admin' || state.user?.kind === 'bank_agent') {
+        state.user.bankStatus = action.payload;
+      }
+    },
     clearAuthError(state) {
       state.error = null;
+    },
+    setUserImage(state, action: PayloadAction<string | null>) {
+      if (state.user) {
+        state.user.userImage = action.payload;
+      }
     },
   },
   extraReducers: (builder) => {
@@ -79,32 +80,64 @@ const authSlice = createSlice({
         state.status = 'loading';
         state.error = null;
       })
-      .addCase(loginThunk.fulfilled, (state, action: PayloadAction<User>) => {
+      .addCase(loginThunk.fulfilled, (state, action: PayloadAction<LoginOutcome>) => {
+        if (action.payload.outcome === 'password_change_required') {
+          // Authenticated, but no session exists until the temporary password is
+          // rotated. Returning to 'idle' rather than 'succeeded' keeps every
+          // `user !== null` guard in the app honest.
+          state.status = 'idle';
+          state.user = null;
+          return;
+        }
         state.status = 'succeeded';
-        state.user = action.payload;
+        state.user = action.payload.user;
       })
       .addCase(loginThunk.rejected, (state, action) => {
         state.status = 'failed';
         state.error = (action.payload as string) ?? 'Something went wrong.';
       })
       .addCase(getMeThunk.pending, (state) => {
+        state.status = 'loading';
         state.error = null;
       })
       .addCase(getMeThunk.fulfilled, (state, action: PayloadAction<User>) => {
+        state.status = 'succeeded';
         state.user = action.payload;
       })
       .addCase(getMeThunk.rejected, (state) => {
+        state.status = 'failed';
         state.user = null;
       });
   },
 });
 
-export const { logout, clearAuthError, hydrate } = authSlice.actions;
+export const { logout, clearAuthError, hydrate, setBankStatus, setUserImage } = authSlice.actions;
 
-export const selectOfficerName = (state: RootState) => state.auth.user?.officerName ?? null;
-// Logged-in user's email — used to filter "My" queues server-side (assigned_to / loan_officer).
-export const selectUserEmail = (state: RootState) => state.auth.user?.username ?? null;
-export const selectOfficerRole = (state: RootState) => state.auth.user?.roles?.[0] ?? null;
+export const selectUser = (state: RootState) => state.auth.user;
+export const selectOfficerName = (state: RootState) => state.auth.user?.name ?? null;
+export const selectBankCode = (state: RootState) => {
+  const user = state.auth.user;
+  if (user?.kind === 'bank_admin' || user?.kind === 'bank_agent') return user.bankCode;
+  return null;
+};
+export const selectBankId = (state: RootState) => {
+  const user = state.auth.user;
+  if (user?.kind === 'bank_admin' || user?.kind === 'bank_agent') return user.bankId;
+  return null;
+};
+export const selectBankName = (state: RootState) => {
+  const user = state.auth.user;
+  if (user?.kind === 'bank_admin' || user?.kind === 'bank_agent') return user.bankName;
+  return null;
+};
+export const selectBankStatus = (state: RootState) => {
+  const user = state.auth.user;
+  if (user?.kind === 'bank_admin' || user?.kind === 'bank_agent') return user.bankStatus;
+  return null;
+};
+export const selectUserEmail = (state: RootState) => state.auth.user?.email ?? null;
+export const selectUserImage = (state: RootState) => state.auth.user?.userImage ?? null;
+export const selectUserKind = (state: RootState) => state.auth.user?.kind ?? null;
 export const selectAuthStatus = (state: RootState) => state.auth.status;
 export const selectAuthError = (state: RootState) => state.auth.error;
 export const selectIsAuthenticated = (state: RootState) => state.auth.user !== null;

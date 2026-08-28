@@ -13,6 +13,9 @@ $success: #79ba74;
 $button-bg: #087F50;
 $button-bg-hover: #05774A;
 
+/* =========================================
+   CSS Custom Properties (For Tailwind / Global)
+   ========================================= */
 :root {
   --page-bg: #{$page-bg};
   --surface: #{$surface};
@@ -29,4 +32,31 @@ $button-bg-hover: #05774A;
   --button-bg: #{$button-bg};
   --button-bg-hover: #{$button-bg-hover};
   --shadow-elevated: 0 30px 80px rgba(18, 31, 54, 0.16);
+
+  /* Brand Greens */
+  --color-green-primary: #16A34A;
+  --color-green-deep: #074728;
+  --color-green-dark: #3d6551;
+  --color-green-medium: #0B6C43;
+  --color-green-forest: #0f6b45;
+  --color-green-hover: #158e41;
+
+  /* Farmer Card Greens */
+  --color-green-light-bg: #F0FDF4;
+  --color-green-light-hover: #DCFCE7;
+  --color-green-border: #86EFAC;
+  --color-green-text: #15803D;
+
+  /* OTP / Bank Blues */
+  --color-blue-primary: #2f6ce5;
+  --color-blue-light-bg: #eff5ff;
+  --color-blue-light-border: #d6e4ff;
+  --color-blue-navy: #16335A;
+
+  /* Neutrals & Grays */
+  --color-gray-offwhite: #F8F9FA;
+  --color-gray-border: #F1F3F4;
+  --color-gray-light: #F3F4F6;
+  --color-gray-medium: #374151;
+  --color-gray-dark: #1F2937;
 }

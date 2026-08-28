@@ -1,54 +1,43 @@
 'use client';
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { FileOutput, Plus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { Download, Plus } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { KPI_CARDS_LAYOUT, LEAD_STATUS_MAP, resolveDateFilter } from '@/features/leads/constants/leads.constants';
-import type { Lead, KpiStat } from '@/features/leads/types/leads.types';
+import type { KpiStat, Lead } from '@/features/leads/types/leads.types';
 
 import LeadKpiCard from '@/features/leads/components/LeadKpiCard';
-import LeadToolbar from '@/features/leads/components/LeadToolbar';
+import { TablePagination } from '@/components/ui/TablePagination';
 import LeadTable from '@/features/leads/components/LeadTable';
-import LeadPagination from '@/features/leads/components/LeadPagination';
+import LeadToolbar from '@/features/leads/components/LeadToolbar';
 import dynamic from 'next/dynamic';
 
 const LeadAdvancedFilters = dynamic(() => import('@/features/leads/components/LeadAdvancedFilters'), {
   ssr: false,
 });
 
-import { useAppDispatch, useAppSelector } from '@/store/hooks';
-import {
-  fetchLeads,
-  fetchLeadSummary,
-  selectLeads,
-  selectIsLeadsLoading,
-  selectLeadSummary,
-  selectSearch,
-  selectActiveTab,
-  selectDateFilter,
-  selectColStatusFilter,
-  selectColCallTimeFilter,
-  setSearch,
-  setActiveTab,
-  setColStatusFilter,
-  setColCallTimeFilter,
-  resetFilters,
-  selectTotalCount,
-  selectAdvFilters,
-  selectLeadsError,
-} from '@/features/leads/store/leadSlice';
-import { fetchLeadMetadataThunk } from '@/features/new-lead/store/newLeadSlice';
-import { selectOfficerName, selectUserEmail } from '@/features/auth/store/authSlice';
 import { AccessDenied } from '@/components/AccessDenied';
+import { DiscoverLoansCta } from '@/components/DiscoverLoansCta';
 import { ConnectionError } from '@/components/ConnectionError';
+// eslint-disable-next-line boundaries/dependencies -- TODO (2026-08-23): needs to be fixed later; hiding for now as this existed before our changes
+import { selectOfficerName } from '@/features/auth/store/authSlice';
+import {
+    fetchLeads,
+    fetchLeadSummary, resetFilters, selectActiveTab, selectAdvFilters, selectColCallTimeFilter, selectColStatusFilter, selectDateFilter, selectHasActiveLeadFilters, selectIsLeadsLoading, selectLeads, selectLeadsError, selectLeadSummary,
+    selectSearch, selectTotalCount, setActiveTab, setColCallTimeFilter, setColStatusFilter, setSearch, setSort
+} from '@/features/leads/store/leadSlice';
+// eslint-disable-next-line boundaries/dependencies -- TODO (2026-08-23): needs to be fixed later; hiding for now as this existed before our changes
+import { fetchLeadMetadataThunk } from '@/features/new-lead/store/newLeadSlice';
+// eslint-disable-next-line boundaries/dependencies -- TODO (2026-08-23): needs to be fixed later; hiding for now as this existed before our changes
+import { fetchTaxonomy } from '@/features/seller/store/loanProductsSlice';
 import { ApiErrorCode, classifyError } from '@/lib/api/apiErrors';
+import { useAppDispatch, useAppSelector } from '@/store/hooks';
 
 export function LeadsDashboardClient() {
   const router = useRouter();
   const dispatch = useAppDispatch();
   const officerName = useAppSelector(selectOfficerName);
-  const userEmail = useAppSelector(selectUserEmail);
   const allLeads = useAppSelector(selectLeads) || [];
   const isLoading = useAppSelector(selectIsLeadsLoading);
   const leadSummary = useAppSelector(selectLeadSummary);
@@ -61,6 +50,7 @@ export function LeadsDashboardClient() {
   const colStatusFilter = useAppSelector(selectColStatusFilter);
   const colCallTimeFilter = useAppSelector(selectColCallTimeFilter);
   const advFilters = useAppSelector(selectAdvFilters);
+  const hasActiveFilters = useAppSelector(selectHasActiveLeadFilters);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -68,13 +58,18 @@ export function LeadsDashboardClient() {
   const [selectedRows, setSelectedRows] = useState<string[]>([]);
   const [openColFilter, setOpenColFilter] = useState<string | null>(null);
   const [sliderIndex, setSliderIndex] = useState(0);
+  const [isMounted, setIsMounted] = useState(false);
 
-  // Tab badge counts come from get_lead_summary.tab_counts (RBAC-scoped). The
-  // backend's `assigned` count maps to the "My" tab. Until the summary loads,
-  // fall back to the active tab's backend total (others blank → '—').
+  useEffect(() => {
+    // officerName comes from client-only auth state, so rendering it during
+    // SSR would mismatch on hydration — this gates it until after mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsMounted(true);
+  }, []);
+
   const tabCounts = useMemo(() => {
     const tc = leadSummary?.tab_counts;
-    if (tc) return { all: tc.all, my: tc.assigned, unassigned: tc.unassigned };
+    if (tc) return { all: tc.all, my: tc.my, unassigned: tc.unassigned };
     return {
       all: activeTab === 'all' ? totalCount : 0,
       my: activeTab === 'my' ? totalCount : 0,
@@ -86,6 +81,7 @@ export function LeadsDashboardClient() {
   useEffect(() => {
     dispatch(fetchLeadSummary());
     dispatch(fetchLeadMetadataThunk());
+    dispatch(fetchTaxonomy());
   }, [dispatch]);
 
   // Load filtered leads data from backend
@@ -101,11 +97,11 @@ export function LeadsDashboardClient() {
     const allStatuses = advFilters.statuses.flatMap(id => LEAD_STATUS_MAP[id.toLowerCase()] || [id]);
     const statusParam = allStatuses.length > 0 ? allStatuses.join(',') : undefined;
 
-    // Combine Search
-    let finalSearch = search;
-    if (advFilters.location?.trim()) {
-      finalSearch = finalSearch ? `${finalSearch} ${advFilters.location.trim()}` : advFilters.location.trim();
-    }
+    // The region goes out as its own filter. It used to be appended to the search
+    // box's text, but `search_query` only ORs over name/phone/external_id — so a
+    // search plus a region became one string that matched neither, and the page
+    // came back empty every time both were set.
+    const region = advFilters.region.trim() || undefined;
 
     const min_amount = advFilters.minAmount !== null ? advFilters.minAmount : undefined;
     const max_amount = advFilters.maxAmount !== null ? advFilters.maxAmount : undefined;
@@ -115,24 +111,27 @@ export function LeadsDashboardClient() {
     // Scope the queue server-side: "My" → my email, "Unassigned" → the literal
     // 'unassigned', "All" → omit. (Falls back to no scope if email isn't loaded.)
     const assigned_to =
-      activeTab === 'my' ? (userEmail ?? undefined)
-      : activeTab === 'unassigned' ? 'unassigned'
-      : undefined;
+      activeTab === 'my' ? 'my'
+        : activeTab === 'unassigned' ? 'unassigned'
+          : undefined;
 
     return dispatch(fetchLeads({
       start: (page - 1) * pageSize,
       page_length: pageSize,
-      search_query: finalSearch,
+      search_query: search,
       status: statusParam,
       start_date,
       end_date,
       min_amount,
       max_amount,
       loan_type,
+      region,
       lead_source,
-      assigned_to
+      assigned_to,
+      sort_by: advFilters.sortBy,
+      sort_order: advFilters.sortOrder,
     }));
-  }, [dispatch, colStatusFilter, colCallTimeFilter, search, advFilters, dateFilter, activeTab, userEmail, pageSize]);
+  }, [dispatch, search, advFilters, dateFilter, activeTab, pageSize]);
 
   // fetched only once during mount or when dependencies change
   useEffect(() => {
@@ -166,16 +165,11 @@ export function LeadsDashboardClient() {
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const safePage = Math.min(currentPage, totalPages);
 
-  // The backend already filters by tab (assigned_to) and paginates, so `allLeads`
-  // is exactly the current page for the active tab — render it as-is.
-  const visible = allLeads;
-
-  const pageNums = useMemo(() => {
-    if (totalPages <= 5) return Array.from({ length: totalPages }, (_, i) => i + 1);
-    if (safePage <= 3) return [1, 2, 3, '…', totalPages];
-    if (safePage >= totalPages - 2) return [1, '…', totalPages - 2, totalPages - 1, totalPages];
-    return [1, '…', safePage - 1, safePage, safePage + 1, '…', totalPages];
-  }, [safePage, totalPages]);
+  // The backend already filters by tab (assigned_to) and paginates, but if it 
+  // fails to paginate and returns all leads, we fallback to client-side slicing.
+  const visible = allLeads.length > pageSize 
+    ? allLeads.slice((currentPage - 1) * pageSize, currentPage * pageSize) 
+    : allLeads;
 
   const allChecked = visible.length > 0 && visible.every((l: Lead) => selectedRows.includes(l.id + l.phone));
   const toggleAll = () => setSelectedRows(allChecked ? [] : visible.map((l: Lead) => l.id + l.phone));
@@ -254,17 +248,11 @@ export function LeadsDashboardClient() {
     return <ConnectionError onRetry={() => loadLeads(currentPage)} />;
   }
 
-  const [isMounted, setIsMounted] = useState(false);
-
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
-
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0 w-full">
       <div className="relative flex flex-col md:flex-row items-start md:items-center justify-between gap-4 md:gap-0 rounded-2xl border border-[#e9e9e9] bg-white px-6 py-5 shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">Welcome back, {isMounted && officerName ? officerName : 'Agent'}</h1>
+          <h1 className="text-2xl font-bold text-text-primary">Welcome, {isMounted && officerName ? officerName : 'Agent'}</h1>
           <p className="mt-1 text-base text-text-muted">Manage, filter, and process your entire lead pipeline.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3 font-semibold w-full md:w-auto mt-2 md:mt-0">
@@ -273,7 +261,7 @@ export function LeadsDashboardClient() {
             onClick={handleExportCSV}
             className="flex-1 md:flex-none inline-flex items-center justify-center gap-2 rounded-xl border border-border-subtle bg-white px-5 py-3 text-base font-medium text-text-primary transition hover:bg-slate-50 active:scale-95"
           >
-            <Download size={18} />
+            <FileOutput size={18} />
             {/* Only a partial selection differs from a page export: select-all (allChecked)
                 covers the whole current page, which is identical to exporting with no selection. */}
             {selectedRows.length > 0 && !allChecked ? `Export Selected (${selectedRows.length})` : 'Export CSV'}
@@ -289,7 +277,7 @@ export function LeadsDashboardClient() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-1 min-w-0">
         <div
           className="flex w-full justify-start gap-3 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] snap-x snap-mandatory"
           onScroll={handleSliderScroll}
@@ -310,6 +298,16 @@ export function LeadsDashboardClient() {
           ))}
         </div>
       </div>
+
+      {/* A development agent browses the catalogue on a farmer's behalf, so the
+          way in belongs on the screen where they work leads. `/loan-discovery`,
+          not `/discover-loans`: the dev-agent portal mounts the same catalogue
+          under its own route. */}
+      <DiscoverLoansCta
+        href="/loan-discovery"
+        title="Browse loans for a farmer"
+        description="Compare products from every participating bank before starting an application on a lead's behalf."
+      />
 
       <div className="overflow-hidden rounded-2xl border border-[#e9e9e9] bg-white shadow-sm hover:-translate-y-0.5 hover:shadow-lg transition-all">
         <LeadToolbar
@@ -335,7 +333,11 @@ export function LeadsDashboardClient() {
           colStatusFilter={colStatusFilter}
           colCallTimeFilter={colCallTimeFilter}
           navigate={router.push}
-          hasFilters={!!(search.trim() || colStatusFilter.length || colCallTimeFilter.length)}
+          // Every filter surface, not just search + the two column filters: a date
+          // range, an amount bucket, a lead source or a region left this false, so a
+          // filtered-empty table claimed there were no leads at all and hid the
+          // "Clear Filters" affordance that was the only way back.
+          hasFilters={hasActiveFilters}
           onToggleAll={toggleAll}
           onToggleRow={toggleRow}
           onSetOpenColFilter={setOpenColFilter}
@@ -343,14 +345,19 @@ export function LeadsDashboardClient() {
           onApplyCallTimeFilter={(v: string[]) => { dispatch(setColCallTimeFilter(v)); setCurrentPage(1); }}
           onClearFilters={clearAllFilters}
           isLoading={isLoading}
+          sortBy={advFilters.sortBy}
+          sortOrder={advFilters.sortOrder}
+          onSortChange={(sortBy, sortOrder) => {
+            dispatch(setSort({ sortBy, sortOrder }));
+            setCurrentPage(1);
+          }}
         />
         {(visible.length > 0 || isLoading) && (
-          <LeadPagination
+          <TablePagination
             visibleCount={visible.length}
-            filteredCount={totalCount}
-            safePage={safePage}
+            totalCount={totalCount}
+            currentPage={safePage}
             totalPages={totalPages}
-            pageNums={pageNums}
             onPageChange={setCurrentPage}
             pageSize={pageSize}
             onPageSizeChange={(newSize) => {

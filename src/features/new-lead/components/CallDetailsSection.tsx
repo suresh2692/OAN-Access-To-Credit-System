@@ -1,8 +1,8 @@
-import { useEffect } from 'react';
-import { useAppSelector, useAppDispatch } from '@/store/hooks';
-import { selectCallDetails, fetchCallDetailsThunk } from '../store/newLeadSlice';
-import { useParams } from 'next/navigation';
+import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { PhoneCall } from 'lucide-react';
+import { useParams } from 'next/navigation';
+import { useEffect } from 'react';
+import { fetchCallDetailsThunk, selectCallDetails } from '../store/newLeadSlice';
 
 export function CallDetailsSection() {
   const callDetails = useAppSelector(selectCallDetails);

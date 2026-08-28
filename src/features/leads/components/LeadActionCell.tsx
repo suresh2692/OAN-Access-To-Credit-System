@@ -1,6 +1,6 @@
-import { memo } from 'react';
-import { Eye, XCircle, Calendar, CheckCircle } from 'lucide-react';
 import { Lead } from '@/features/leads/types/leads.types';
+import { Calendar, CheckCircle, Eye, XCircle } from 'lucide-react';
+import { memo } from 'react';
 
 interface LeadActionCellProps {
   lead: Lead;
@@ -35,7 +35,6 @@ export function hasVisitScheduled(lead: Lead): boolean {
   return hasVisit && scheduleStatus !== 'missed' && (status === 'active' || status === 'verified');
 }
 
-// @ts-ignore (disable lint warning for unused variable, or remove if unused)
 export function getLeadRoute(lead: Lead): string {
   const detailRoute = `/leads/${lead.id.replace('#', '')}`;
   // Only route to the schedule page if a visit NEEDS to be scheduled (i.e. missed)

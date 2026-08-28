@@ -1,8 +1,8 @@
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
-import { selectFarmerState, updateFarmerDetails } from '../store/farmerSlice';
-import { selectConsentState } from '../store/consentSlice';
-import { useParams } from 'next/navigation';
 import { User } from 'lucide-react';
+import { useParams } from 'next/navigation';
+import { selectConsentState } from '@/features/consent';
+import { selectFarmerState, updateFarmerDetails } from '../store/farmerSlice';
 
 export function FarmerDetailsSection() {
   const dispatch = useAppDispatch();
@@ -28,72 +28,77 @@ export function FarmerDetailsSection() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 px-6 gap-4 md:gap-6 w-full">
         <div className="flex flex-col gap-2">
-          <label className="text-[15px] font-semibold text-[#232F34]">
+          <label htmlFor="farmer-first-name" className="text-[15px] font-semibold text-[#232F34]">
             First Name <span className="text-red-500">*</span>
           </label>
           <input
+            id="farmer-first-name"
             type="text"
             value={farmerDetails.firstName}
             onChange={(e) => handleChange('firstName')(e.target.value)}
             placeholder="Enter First Name"
             readOnly={isLocked}
-            className={`w-full h-[42px] rounded-md border border-[#D1D5DB] px-4 text-[15px] text-[#232F34] focus:outline-none ${isLocked ? 'bg-gray-50' : 'bg-white'}`}
+            className={`w-full h-[42px] rounded-md border px-4 text-[15px] focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-1 ${isLocked ? 'border-gray-200 bg-gray-100 text-gray-500 cursor-not-allowed' : 'border-[#D1D5DB] bg-white text-[#232F34]'}`}
           />
         </div>
 
         <div className="flex flex-col gap-2">
-          <label className="text-[15px] font-semibold text-[#232F34]">
+          <label htmlFor="farmer-last-name" className="text-[15px] font-semibold text-[#232F34]">
             Last Name <span className="text-red-500">*</span>
           </label>
           <input
+            id="farmer-last-name"
             type="text"
             value={farmerDetails.lastName}
             onChange={(e) => handleChange('lastName')(e.target.value)}
             placeholder="Enter Last Name"
             readOnly={isLocked}
-            className={`w-full h-[42px] rounded-md border border-[#D1D5DB] px-4 text-[15px] text-[#232F34] focus:outline-none ${isLocked ? 'bg-gray-50' : 'bg-white'}`}
+            className={`w-full h-[42px] rounded-md border px-4 text-[15px] focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-1 ${isLocked ? 'border-gray-200 bg-gray-100 text-gray-500 cursor-not-allowed' : 'border-[#D1D5DB] bg-white text-[#232F34]'}`}
           />
         </div>
 
         <div className="flex flex-col gap-2">
-          <label className="text-[15px] font-semibold text-[#232F34]">
+          <label htmlFor="farmer-location" className="text-[15px] font-semibold text-[#232F34]">
             Location
           </label>
           <input
+            id="farmer-location"
             type="text"
             value={farmerDetails.location}
             onChange={(e) => handleChange('location')(e.target.value)}
             placeholder="Location"
             readOnly={isLocked}
-            className={`w-full h-[42px] rounded-md border border-[#D1D5DB] px-4 text-[15px] text-[#232F34] focus:outline-none ${isLocked ? 'bg-gray-50' : 'bg-white'}`}
+            className={`w-full h-[42px] rounded-md border px-4 text-[15px] focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-1 ${isLocked ? 'border-gray-200 bg-gray-100 text-gray-500 cursor-not-allowed' : 'border-[#D1D5DB] bg-white text-[#232F34]'}`}
           />
         </div>
 
         <div className="flex flex-col gap-2">
-          <label className="text-[15px] font-semibold text-[#232F34]">
+          <label htmlFor="farmer-phone-number" className="text-[15px] font-semibold text-[#232F34]">
             Phone Number <span className="text-red-500">*</span>
           </label>
           <input
+            id="farmer-phone-number"
             type="text"
             value={farmerDetails.phoneNumber}
             onChange={(e) => handleChange('phoneNumber')(e.target.value)}
             placeholder="Phone Number"
             readOnly={isLocked}
-            className={`w-full h-[42px] rounded-md border border-[#D1D5DB] px-4 text-[15px] text-[#232F34] focus:outline-none ${isLocked ? 'bg-gray-50' : 'bg-white'}`}
+            className={`w-full h-[42px] rounded-md border px-4 text-[15px] focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-1 ${isLocked ? 'border-gray-200 bg-gray-100 text-gray-500 cursor-not-allowed' : 'border-[#D1D5DB] bg-white text-[#232F34]'}`}
           />
         </div>
 
         <div className="flex flex-col gap-2">
-          <label className="text-[15px] font-semibold text-[#232F34]">
+          <label htmlFor="farmer-email" className="text-[15px] font-semibold text-[#232F34]">
             Email ID
           </label>
           <input
+            id="farmer-email"
             type="email"
             value={farmerDetails.email}
             onChange={(e) => handleChange('email')(e.target.value)}
             placeholder="Email ID"
             readOnly={isLocked}
-            className={`w-full h-[42px] rounded-md border border-[#D1D5DB] px-4 text-[15px] text-[#232F34] focus:outline-none ${isLocked ? 'bg-gray-50' : 'bg-white'}`}
+            className={`w-full h-[42px] rounded-md border px-4 text-[15px] focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-1 ${isLocked ? 'border-gray-200 bg-gray-100 text-gray-500 cursor-not-allowed' : 'border-[#D1D5DB] bg-white text-[#232F34]'}`}
           />
         </div>
       </div>

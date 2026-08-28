@@ -1,20 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
-import { useAppDispatch, useAppSelector } from '@/store/hooks';
-import {
-  selectNewLeadDraft,
-  updateNewLeadDraft,
-  resetNewLeadDraft,
-  submitNewLeadThunk,
-  type NewLeadDraft,
-} from '@/features/new-lead/store/newLeadSlice';
 import { FeedbackModal } from '@/components/ui/FeedbackModal';
-import { logger } from '@/lib/logger';
-import { LeadInfoSection } from '../LeadInfoSection';
 import { createLeadSchema } from '@/features/new-lead/schemas/lead.schema';
+import {
+    resetNewLeadDraft, selectNewLeadDraft, submitNewLeadThunk, updateNewLeadDraft, type NewLeadDraft
+} from '@/features/new-lead/store/newLeadSlice';
+import { logger } from '@/lib/logger';
+import { useAppDispatch, useAppSelector } from '@/store/hooks';
+import { ArrowLeft } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { LeadInfoSection } from '../LeadInfoSection';
 
 
 export function CreateLeadForm() {
@@ -62,8 +58,12 @@ export function CreateLeadForm() {
       router.push(response?.lead_id ? `/leads/${response.lead_id}` : '/leads');
     } catch (error) {
       logger.error('Failed to create lead (Backend/System Error):', error);
-      const errorMsg = typeof error === 'string' ? error : (error as Error)?.message || '';
-      if (errorMsg.toLowerCase().includes('already exists')) {
+      const payload = error as { message?: string; details?: Record<string, string> };
+      const phoneFieldError = payload?.details?.phone_number;
+      const errorMsg = payload?.message || (typeof error === 'string' ? error : (error as Error)?.message || '');
+      if (phoneFieldError) {
+        setValidationError(phoneFieldError);
+      } else if (errorMsg.toLowerCase().includes('already exists')) {
         setValidationError(errorMsg);
       } else {
         setShowErrorPopup(true);

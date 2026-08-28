@@ -1,8 +1,8 @@
-import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import { newLeadService, FarmerDetails } from '../api/newLead.service';
-import type { RootState } from '@/store';
-import { initializeLead, clearForm } from './actions';
 import { logger } from '@/lib/logger';
+import type { RootState } from '@/store';
+import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { FarmerDetails, newLeadService } from '../api/newLead.service';
+import { clearForm, initializeLead } from './actions';
 export type { FarmerDetails };
 
 interface FarmerState {
@@ -14,6 +14,10 @@ interface FarmerState {
   // Error from fetching a specific lead's details (e.g. 'FORBIDDEN' on a 403).
   detailsError: string | null;
   isPollingLong: boolean;
+  // requestId of the fetchLeadDetailsThunk invocation currently "owning" the
+  // isPollingLong indicator, so a concurrent quick (non-polling) call can't
+  // clear it out from under a still-running long poll — see setIsPollingLong.
+  pollingRequestId: string | null;
 }
 // dont know if image url is needed since
 export const createDefaultFarmerDetails = (partial?: Partial<FarmerDetails>): FarmerDetails => ({
@@ -26,6 +30,14 @@ export const createDefaultFarmerDetails = (partial?: Partial<FarmerDetails>): Fa
   profileImageUrl: partial?.profileImageUrl ?? '',
 });
 
+// Permission/session errors won't resolve by retrying, so both the retry loop
+// and the final attempt bail out on them the same way — a 403 surfaces as
+// not-found and a 401 triggers the global logout middleware.
+function authErrorPayload(error: unknown): 'FORBIDDEN' | 'UNAUTHORIZED' | null {
+  const message = error instanceof Error ? error.message : '';
+  return message === 'FORBIDDEN' || message === 'UNAUTHORIZED' ? message : null;
+}
+
 const initialState: FarmerState = {
   farmerId: '',
   farmerDetails: createDefaultFarmerDetails(),
@@ -34,6 +46,7 @@ const initialState: FarmerState = {
   searchError: null,
   detailsError: null,
   isPollingLong: false,
+  pollingRequestId: null,
 };
 
 
@@ -54,29 +67,45 @@ export const searchFarmerThunk = createAsyncThunk<FarmerDetails, string>(
 
 export const fetchLeadDetailsThunk = createAsyncThunk<
   FarmerDetails,
-  string | { leadId: string; shouldPoll?: boolean },
+  string | { leadId?: string | undefined; shouldPoll?: boolean | undefined } | void | undefined,
   { state: RootState }
 >(
   'farmer/fetchLeadDetails',
-  async (arg, { dispatch, rejectWithValue }) => {
-    const leadId = typeof arg === 'string' ? arg : arg.leadId;
-    let shouldPoll = typeof arg === 'string' ? false : (arg.shouldPoll ?? false);
+  async (arg, { dispatch, rejectWithValue, signal, requestId }) => {
+    const leadId = typeof arg === 'string' ? arg : arg?.leadId;
+    const shouldPoll = typeof arg === 'string' ? false : (arg?.shouldPoll ?? false);
 
-    const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-    let maxRetries = shouldPoll ? 24 : 1;
+    // Resolves early on abort instead of always waiting out the full delay, so a
+    // cancellation mid-retry-wait is noticed immediately rather than up to 5s late.
+    const delay = (ms: number) => new Promise<void>((resolve) => {
+      if (signal.aborted) { resolve(); return; }
+      const timer = setTimeout(() => { cleanup(); resolve(); }, ms);
+      const onAbort = () => { cleanup(); resolve(); };
+      function cleanup() {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', onAbort);
+      }
+      signal.addEventListener('abort', onAbort);
+    });
+    const maxRetries = shouldPoll ? 24 : 1;
     let retries = 0;
 
     let timeoutId: NodeJS.Timeout | undefined;
     if (shouldPoll) {
       timeoutId = setTimeout(() => {
-        dispatch(setIsPollingLong(true));
+        dispatch(setIsPollingLong({ value: true, requestId }));
       }, 2000);
     }
 
     try {
       while (retries < maxRetries) {
+        // Stop polling immediately if the caller aborted (e.g. component unmounted).
+        if (signal.aborted) {
+          throw new DOMException('Aborted', 'AbortError');
+        }
+
         try {
-          const response = await newLeadService.getLeadDetails(leadId);
+          const response = await newLeadService.getLeadDetails(leadId, signal);
 
           // Data has arrived if farmer_profile_created is true
           const dataArrived = response && response.farmer_profile_created === true;
@@ -91,11 +120,12 @@ export const fetchLeadDetailsThunk = createAsyncThunk<
 
           logger.log(`Lead details not yet ready for leadId: ${leadId}. Retrying in 5 seconds... (Attempt ${retries + 1}/${maxRetries})`);
         } catch (error) {
-          const message = error instanceof Error ? error.message : '';
-          // Permission/session errors won't resolve by retrying — bail out
-          // immediately so a 403 surfaces as not-found and a 401 logs out.
-          if (message === 'FORBIDDEN' || message === 'UNAUTHORIZED') {
-            return rejectWithValue(message);
+          if (error instanceof Error && error.name === 'AbortError') {
+            throw error;
+          }
+          const authError = authErrorPayload(error);
+          if (authError) {
+            return rejectWithValue(authError);
           }
           if (!shouldPoll) {
             return rejectWithValue(error instanceof Error ? error.message : 'Unknown Cause: Failed to fetch lead details');
@@ -106,22 +136,32 @@ export const fetchLeadDetailsThunk = createAsyncThunk<
         retries++;
         if (retries < maxRetries) {
           await delay(5000);
+          if (signal.aborted) {
+            throw new DOMException('Aborted', 'AbortError');
+          }
         }
       }
 
       // Final attempt before rejecting
       try {
-        const finalResponse = await newLeadService.getLeadDetails(leadId);
+        const finalResponse = await newLeadService.getLeadDetails(leadId, signal);
         if (shouldPoll && finalResponse.farmer_profile_created === false) {
           return rejectWithValue("Demographic sync failed. Please request a new OTP and re-submit the consent.");
         }
         return finalResponse;
       } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
+        const authError = authErrorPayload(error);
+        if (authError) {
+          return rejectWithValue(authError);
+        }
         return rejectWithValue(error instanceof Error ? error.message : 'Unknown Cause: Failed to fetch lead details after retries');
       }
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
-      dispatch(setIsPollingLong(false));
+      dispatch(setIsPollingLong({ value: false, requestId }));
     }
   }
 );
@@ -138,8 +178,18 @@ const farmerSlice = createSlice({
     updateFarmerDetails(state, action: PayloadAction<Partial<FarmerDetails>>) {
       state.farmerDetails = { ...state.farmerDetails, ...action.payload };
     },
-    setIsPollingLong(state, action: PayloadAction<boolean>) {
-      state.isPollingLong = action.payload;
+    setIsPollingLong(state, action: PayloadAction<{ value: boolean; requestId: string }>) {
+      const { value, requestId } = action.payload;
+      if (value) {
+        state.isPollingLong = true;
+        state.pollingRequestId = requestId;
+      } else if (state.pollingRequestId === requestId) {
+        // Only the invocation that claimed ownership may clear it — an
+        // unrelated concurrent call finishing must not hide the indicator
+        // for a still-running long poll.
+        state.isPollingLong = false;
+        state.pollingRequestId = null;
+      }
     },
     clearFarmerState() {
       return initialState;
@@ -184,10 +234,15 @@ const farmerSlice = createSlice({
           farmer_profile_created: action.payload.farmer_profile_created,
           consent_request_status: action.payload.consent_request_status,
           consent_request_otp_verified: action.payload.consent_request_otp_verified,
+          consent_request_name: action.payload.consent_request_name,
         };
         state.detailsError = null;
       })
       .addCase(fetchLeadDetailsThunk.rejected, (state, action) => {
+        // Ignore aborted requests (e.g. superseded by a newer poll, or the
+        // component unmounted) — there's no newer result to reflect, so leave
+        // whatever error/loading state already exists alone.
+        if (action.meta.aborted) return;
         state.detailsError = (action.payload as string) ?? action.error.message ?? null;
       })
 

@@ -1,5 +1,5 @@
-import Link from 'next/link';
 import { ShieldAlert } from 'lucide-react';
+import Link from 'next/link';
 
 interface AccessDeniedProps {
   /** Optional context shown beneath the heading, e.g. the feature name. */

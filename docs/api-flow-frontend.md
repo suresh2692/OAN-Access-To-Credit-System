@@ -122,14 +122,19 @@ the new loan and the updated lead status — no separate `update_lead_status` or
 
 ## 3. Data Flow & Dependencies (Request Chains)
 
-### Chain 1: New Lead Consent Flow
+### Chain 1: Consent Flow
 ```
 searchFarmer(fayda_id)
-  └─► sendOtpAndCreateConsent(lead_id, fayda_id, ...)  [needs lead_id from prior step or existing lead]
-        └─► verifyOtp(lead_id, otp_code)
-              └─► fetchLeadDetails(lead_id)             [confirms consent state]
+  └─► sendOtpAndCreateConsent(fayda_id, ...)
+        └─► verifyOtp(consent_request, otp_code)
+              └─► submitConsent(consent_request, consent document, ...)
 ```
-**Optimization:** `verifyOtp` response should return the updated lead state so `fetchLeadDetails` is unnecessary.
+The consent flow is not lead-anchored. `request_otp` returns the
+`consent_request` identifier, which is passed to `verify_otp` and
+`submit_consent`; `lead_id` is not required by these calls.
+
+**Optimization:** `verifyOtp` response should return the updated consent state so
+an additional consent-state refetch is unnecessary.
 
 ---
 

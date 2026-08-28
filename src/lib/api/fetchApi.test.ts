@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fetchApi, ApiError } from './fetchApi';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError, fetchApi } from './fetchApi';
 
 describe('fetchApi', () => {
   beforeEach(() => {
@@ -75,9 +75,18 @@ describe('fetchApi', () => {
     }
   });
 
-  it('should throw ApiError with server message if _server_messages is present', async () => {
+  it('should not surface _server_messages contents to the caller', async () => {
+    // Frappe puts raw exception detail in this field — class names, absolute
+    // file paths, SQL fragments. The proxy strips it on the way through; if one
+    // ever slips past, the message shown must still be the generic fallback and
+    // not the backend's internals.
     const errorResponse = {
-      _server_messages: JSON.stringify([JSON.stringify({ message: 'Detailed Server Error' })]),
+      _server_messages: JSON.stringify([
+        JSON.stringify({
+          message:
+            'pymysql.err.ProgrammingError in /home/frappe/apps/oan_a2c/oan_a2c/api/v1/leads.py:212 — SELECT * FROM `tabA2C Lead`',
+        }),
+      ]),
     };
     vi.spyOn(global, 'fetch').mockResolvedValue({
       ok: false,
@@ -91,7 +100,11 @@ describe('fetchApi', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(ApiError);
       const apiError = error as ApiError;
-      expect(apiError.message).toBe('Detailed Server Error');
+      expect(apiError.message).toBe('The server ran into a problem. Please try again shortly.');
+      expect(apiError.message).not.toContain('pymysql');
+      expect(apiError.message).not.toContain('/home/frappe');
+      expect(apiError.message).not.toContain('SELECT');
+      // Still attached for callers that need to inspect it — just not rendered.
       expect(apiError.responseData).toEqual(errorResponse);
     }
   });
@@ -117,6 +130,38 @@ describe('fetchApi', () => {
       expect(apiError.message).toBe('Application level validation failed');
       expect(apiError.responseData).toEqual(appErrorResponse);
     }
+  });
+
+  // An abort that lands after the headers but before the body is read rejects in
+  // `response.json()`, with `response.ok` still true. Returning null there made
+  // callers read `null?.data` as a missing field and log an API contract
+  // violation for what was really a cancelled request.
+  it('should propagate an abort that interrupts reading the response body', async () => {
+    const controller = new AbortController();
+    vi.spyOn(global, 'fetch').mockImplementation(async () => ({
+      ok: true,
+      status: 200,
+      json: async (): Promise<unknown> => {
+        controller.abort();
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      },
+    } as Response));
+
+    await expect(fetchApi('test-path', { signal: controller.signal })).rejects.toThrow(
+      expect.objectContaining({ name: 'AbortError' })
+    );
+  });
+
+  it('should still return null when an ok response simply has no JSON body', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async (): Promise<unknown> => {
+        throw new SyntaxError('Unexpected end of JSON input');
+      },
+    } as Response);
+
+    await expect(fetchApi('test-path')).resolves.toBeNull();
   });
 
   describe('with window defined (browser environment)', () => {

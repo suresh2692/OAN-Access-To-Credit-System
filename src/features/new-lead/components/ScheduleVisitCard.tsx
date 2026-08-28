@@ -1,12 +1,13 @@
-import { logger } from '@/lib/logger';
-import { useState } from 'react';
-import { useAppDispatch, useAppSelector } from '@/store/hooks';
-import { selectVisitState, selectIsLeadFinalized, setVisitSchedule, scheduleVisitThunk, fetchVisitSchedulesThunk, updateVisitScheduleStatusThunk } from '..';
-import { Calendar, CalendarCheck, Clock, MapPin, Pencil, CheckCircle, XCircle } from 'lucide-react';
 import { DatePickerField } from '@/components/ui/DatePickerField';
-import { useParams } from 'next/navigation';
+import { logger } from '@/lib/logger';
 import { normalizeLeadId } from '@/lib/utils';
+import { useAppDispatch, useAppSelector } from '@/store/hooks';
+import { AlertCircle, Calendar, CalendarCheck, CheckCircle, Clock, MapPin, Pencil, XCircle } from 'lucide-react';
 import dynamic from 'next/dynamic';
+import { useParams } from 'next/navigation';
+import { useState } from 'react';
+import { fetchVisitSchedulesThunk, scheduleVisitThunk, selectIsLeadFinalized, selectVerificationBlocked, selectVisitState, setVisitSchedule, updateVisitScheduleStatusThunk } from '..';
+import type { VisitScheduleDetails } from './modals/ScheduleNewVisitForm';
 
 const ScheduleNewVisitForm = dynamic(() => import('./modals/ScheduleNewVisitForm').then(mod => mod.ScheduleNewVisitForm), {
   ssr: false,
@@ -29,6 +30,7 @@ export function ScheduleVisitCard({
   const dispatch = useAppDispatch();
   const { visitSchedule } = useAppSelector(selectVisitState);
   const isFinalized = useAppSelector(selectIsLeadFinalized);
+  const verificationBlocked = useAppSelector(selectVerificationBlocked);
   const params = useParams();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
@@ -37,10 +39,11 @@ export function ScheduleVisitCard({
   const activeLeadId = normalizeLeadId(params?.id as string);
 
   const isPassed = isScheduled && visitDate ? new Date(visitDate) < new Date() : false;
+  const isMissingForVerification = Boolean(verificationBlocked) && !isScheduled && !visitSchedule?.date;
 
 
 
-  const handleSave = async (scheduleDetails: any) => {
+  const handleSave = async (scheduleDetails: VisitScheduleDetails) => {
     const activeLeadId = params?.id as string;
     if (!activeLeadId) {
       throw new Error("Missing Lead ID");
@@ -75,9 +78,9 @@ export function ScheduleVisitCard({
 
       // Refresh schedules list to clear the scheduled state live
       await dispatch(fetchVisitSchedulesThunk(activeLeadId)).unwrap();
-    } catch (err: any) {
+    } catch (err) {
       logger.error("Failed to complete visit:", err);
-      setErrorFeedback(typeof err === 'string' ? err : err.message || 'Failed to complete visit');
+      setErrorFeedback(typeof err === 'string' ? err : (err instanceof Error && err.message) || 'Failed to complete visit');
     } finally {
       setIsCompleting(false);
     }
@@ -100,9 +103,9 @@ export function ScheduleVisitCard({
 
       // Refresh schedules list to clear the scheduled state live
       await dispatch(fetchVisitSchedulesThunk(activeLeadId)).unwrap();
-    } catch (err: any) {
+    } catch (err) {
       logger.error("Failed to mark visit as missed:", err);
-      setErrorFeedback(typeof err === 'string' ? err : err.message || 'Failed to mark visit as missed');
+      setErrorFeedback(typeof err === 'string' ? err : (err instanceof Error && err.message) || 'Failed to mark visit as missed');
     } finally {
       setIsMarkingMissed(false);
     }
@@ -111,16 +114,23 @@ export function ScheduleVisitCard({
   const formattedDate = visitDate ? new Date(visitDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'No date set';
 
   return (
-    <div className="flex flex-col items-start bg-white border border-[#F1F3F4] shadow-[0px_4px_6px_-1px_rgba(0,0,0,0.05),0px_2px_4px_-1px_rgba(0,0,0,0.03)] hover:-translate-y-1 hover:shadow-lg transition-all duration-300 rounded-xl w-full relative overflow-hidden">
-      {/* Left blue strip */}
-      <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#3B82F6] z-10" />
+    <div className={`flex flex-col items-start bg-white border shadow-[0px_4px_6px_-1px_rgba(0,0,0,0.05),0px_2px_4px_-1px_rgba(0,0,0,0.03)] hover:-translate-y-1 hover:shadow-lg transition-all duration-300 rounded-xl w-full relative overflow-hidden ${isMissingForVerification ? 'border-[#EF4444] border-l-4' : 'border-[#F1F3F4]'
+      }`}>
+      {/* Left blue/red strip */}
+      <div className={`absolute left-0 top-0 bottom-0 w-1 z-10 ${isMissingForVerification ? 'bg-[#EF4444]' : 'bg-[#3B82F6]'}`} />
 
-      <div className="flex flex-row items-center p-4 px-6 w-full bg-[#EFF6FF] border-b border-[#F3F4F6]">
+      <div className={`flex flex-row items-center p-4 px-6 w-full border-b border-[#F3F4F6] ${isMissingForVerification ? 'bg-[#FEF2F2]' : 'bg-[#EFF6FF]'}`}>
         <div className="flex flex-row items-center gap-2">
-          {isScheduled ? <Clock size={18} className="text-[#1E3A8A]" /> : <Calendar size={18} className="text-[#1E3A8A]" />}
-          <h3 className="font-inter font-semibold text-lg leading-5 text-[#1E3A8A]">
+          {isScheduled ? <Clock size={18} className={isMissingForVerification ? 'text-[#DC2626]' : 'text-[#1E3A8A]'} /> : <Calendar size={18} className={isMissingForVerification ? 'text-[#DC2626]' : 'text-[#1E3A8A]'} />}
+          <h3 className={`font-inter font-semibold text-lg leading-5 ${isMissingForVerification ? 'text-[#DC2626]' : 'text-[#1E3A8A]'}`}>
             {isScheduled ? (isPassed ? 'Visit Overdue' : 'Upcoming Visit') : 'Schedule Visit'}
           </h3>
+          {isMissingForVerification && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#FEF2F2] border border-[#FECACA] rounded-md text-[#DC2626] text-xs font-medium ml-2">
+              <AlertCircle size={12} />
+              Required for verification
+            </span>
+          )}
         </div>
       </div>
 

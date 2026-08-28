@@ -1,7 +1,11 @@
-import { useState, useRef, useEffect } from 'react';
-import { Check, Filter } from 'lucide-react';
+// eslint-disable-next-line boundaries/dependencies -- TODO (2026-08-23): needs to be fixed later; hiding for now as this existed before our changes
+import { selectLeadStatusesOptions } from '@/features/new-lead/store/newLeadSlice';
+// eslint-disable-next-line boundaries/dependencies -- TODO (2026-08-23): needs to be fixed later; hiding for now as this existed before our changes
+import { selectCategories } from '@/features/seller/store/loanProductsSlice';
+import { useModalA11y } from '@/hooks/useModalA11y';
 import { useAppSelector } from '@/store/hooks';
-import { selectLoanTypesOptions, selectLeadStatusesOptions } from '@/features/new-lead/store/newLeadSlice';
+import { Check, Filter } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 
 /* ─── LeadColFilterPopup ────────────────────────────────────────────── */
@@ -14,12 +18,9 @@ interface LeadColFilterPopupProps {
 }
 
 export function LeadColFilterPopup({ col, anchorRef, initialSelected = [], onApply, onClose }: LeadColFilterPopupProps) {
-  const popupRef = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<string[]>(initialSelected);
-
-  useEffect(() => {
-    // Positioning is now handled by absolute positioning relative to the column header.
-  }, [anchorRef]);
+  // Only ever mounted while open, so it's always "open" from this hook's perspective.
+  const popupRef = useModalA11y<HTMLDivElement>(true, onClose);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -30,10 +31,10 @@ export function LeadColFilterPopup({ col, anchorRef, initialSelected = [], onApp
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [anchorRef, onClose]);
+  }, [anchorRef, onClose, popupRef]);
 
 
-  const loanTypesOptions = useAppSelector(selectLoanTypesOptions);
+  const loanTypesOptions = useAppSelector(selectCategories).map((c) => c.term_name);
   const leadStatusesOptions = useAppSelector(selectLeadStatusesOptions);
 
   const opts = col === 'STATUS'
@@ -46,11 +47,15 @@ export function LeadColFilterPopup({ col, anchorRef, initialSelected = [], onApp
   return (
     <div
       ref={popupRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={col === 'CALL START TIME' ? 'Filter by date' : `Filter by ${col}`}
+      tabIndex={-1}
       className="loan-filter-popup absolute top-full left-0 mt-2 z-[99] flex min-w-[240px] w-max flex-col rounded-xl border border-gray-200 bg-white shadow-xl normal-case tracking-normal text-gray-900"
       onClick={(e) => e.stopPropagation()}
     >
       <div className="flex items-center gap-2 border-b border-gray-100 px-5 py-4 text-sm font-bold text-gray-500 uppercase tracking-wide">
-        <Filter size={16} className="text-emerald-600" />
+        <Filter size={16} className="text-[#16A34A]" />
         {col === 'CALL START TIME' ? 'FILTER BY DATE' : `FILTER BY ${col}`}
       </div>
       <div className="flex flex-col max-h-[300px] overflow-y-auto font-medium [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">

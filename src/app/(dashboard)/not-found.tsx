@@ -5,7 +5,7 @@ export default function DashboardNotFound() {
     <div className="flex flex-col items-center justify-center h-full min-h-[400px] w-full p-6 text-center">
       <h2 className="text-4xl font-bold text-gray-900 mb-4 font-display">404</h2>
       <p className="text-xl text-gray-700 mb-8 max-w-md">
-        The dashboard page you're looking for doesn't exist.
+        The dashboard page you&apos;re looking for doesn&apos;t exist.
       </p>
       <Link 
         href="/leads"

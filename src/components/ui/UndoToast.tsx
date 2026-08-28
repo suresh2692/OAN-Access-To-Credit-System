@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
 import { Undo2, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 
 interface UndoToastProps {
   /** Message shown in the toast, e.g. "Document removed". */
@@ -22,7 +22,9 @@ export function UndoToast({ message, onUndo, onCommit, durationMs = 5000 }: Undo
   const [remaining, setRemaining] = useState(durationMs);
   // Keep latest callbacks in refs so the timers don't restart on re-render.
   const onCommitRef = useRef(onCommit);
-  onCommitRef.current = onCommit;
+  useEffect(() => {
+    onCommitRef.current = onCommit;
+  });
 
   useEffect(() => {
     const start = Date.now();
@@ -43,7 +45,7 @@ export function UndoToast({ message, onUndo, onCommit, durationMs = 5000 }: Undo
   const progress = Math.max(0, Math.min(100, (remaining / durationMs) * 100));
 
   return (
-    <div className="fixed bottom-5 right-5 z-[9999] w-[min(88vw,320px)] overflow-hidden rounded-lg bg-gray-900 text-white shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-200">
+    <div role="status" aria-live="polite" className="fixed bottom-5 right-5 z-[9999] w-[min(88vw,320px)] overflow-hidden rounded-lg bg-gray-900 text-white shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-200">
       <div className="flex items-center justify-between gap-2 px-3 py-2">
         <span className="truncate text-sm font-medium">{message}</span>
         <div className="flex shrink-0 items-center gap-0.5">

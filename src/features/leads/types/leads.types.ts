@@ -12,9 +12,16 @@ export interface GetLeadsParams {
   min_amount?: number | undefined;
   max_amount?: number | undefined;
   loan_type?: string | undefined;
+  // Prefix-matched against `region` on the lead's linked A2C Farmer Profile —
+  // A2C Lead itself carries no location. One field, not three: the drawer has a
+  // single text box, and `get_leads` ANDs whichever of region/woreda/kebele it is
+  // given, so sending one free-text value as all three would match nothing.
+  region?: string | undefined;
   // User email to scope the queue, or the literal 'unassigned' for leads with no
   // agent (backend get_leads `assigned_to` filter). Omit for all leads.
   assigned_to?: string | undefined;
+  sort_by?: 'loan_amount' | 'creation' | undefined;
+  sort_order?: 'asc' | 'desc' | undefined;
 }
 
 // output for Get Leads API 
@@ -59,19 +66,27 @@ export interface KpiStat {
 }
 export interface LeadSummaryResponse {
   total: number;
+  /**
+   * Keyed by A2C Lead status. These six are the doctype's entire Select list and
+   * the backend seeds all of them, so each is present even at zero.
+   *
+   * The named keys here used to be Open / Initiated / Qualified / Not Interested
+   * — none of which are lead statuses. The index signature meant that read
+   * cleanly and returned `undefined` forever; it is kept only for forward
+   * compatibility, not as licence to invent keys.
+   */
   by_status: {
-    Open?: number;
-    Initiated?: number;
-    Qualified?: number;
-    'Not Interested'?: number;
+    Active?: number;
+    Verified?: number;
     Processed?: number;
+    Granted?: number;
+    Rejected?: number;
+    Dormant?: number;
     [key: string]: number | undefined;
   };
-  // get_lead_summary §4.2: all = total, assigned = leads with an agent (RBAC-scoped
-  // to the caller, so effectively "my"), unassigned = all − assigned.
   tab_counts?: {
     all: number;
-    assigned: number;
+    my: number;
     unassigned: number;
   };
 }

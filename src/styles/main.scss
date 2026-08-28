@@ -1,7 +1,7 @@
 @use './variables';
 
 @import "tailwindcss";
-@config "../../tailwind.config.ts";
+@config "../../tailwind.config.mts";
 
 html {
   height: 100%;
@@ -17,6 +17,8 @@ body {
   @apply font-body;
   background: #f7f8fb;
   isolation: isolate;
+  scrollbar-color: #16A34A #f1f5f9;
+  scrollbar-width: thin;
 }
 
 #root {
@@ -81,4 +83,29 @@ input[type='checkbox']:checked::after {
 input[type='checkbox']:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* 
+ * Extra SCSS styles for the Access to Credit System
+ * Add your custom SCSS overrides, mixins, and classes here 
+ */
+
+// Custom scrollbar styles using SCSS
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #16A34A;
+  border-radius: 4px;
+  
+  &:hover {
+    background: #15803d;
+  }
 }

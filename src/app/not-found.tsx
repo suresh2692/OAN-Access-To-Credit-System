@@ -5,7 +5,7 @@ export default function GlobalNotFound() {
     <div className="flex flex-col items-center justify-center min-h-screen w-full p-6 text-center bg-gray-50">
       <h2 className="text-4xl font-bold text-gray-900 mb-4 font-display">404</h2>
       <p className="text-xl text-gray-700 mb-8 max-w-md">
-        The page you're looking for doesn't exist or has been moved.
+        The page you&apos;re looking for doesn&apos;t exist or has been moved.
       </p>
       <Link 
         href="/"

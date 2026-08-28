@@ -1,10 +1,12 @@
+import { PanelLoader } from '@/components/ui/Loader';
+
+/**
+ * Fallback for the authenticated area as a whole — reached when the *shell*
+ * itself is still resolving (a cold entry into the dashboard). Navigation
+ * between pages inside one role's shell resolves against the per-role
+ * `loading.tsx` next to that role's layout instead, so the sidebar and header
+ * stay on screen rather than being replaced by a spinner.
+ */
 export default function DashboardLoading() {
-  return (
-    <div className="flex items-center justify-center h-full min-h-[400px] w-full">
-      <div className="flex flex-col items-center gap-4">
-        <div className="w-8 h-8 border-4 border-gray-200 border-t-[var(--button-bg)] rounded-full animate-spin"></div>
-        <p className="text-gray-500 font-medium">Loading content...</p>
-      </div>
-    </div>
-  );
+  return <PanelLoader label="Loading your workspace…" />;
 }

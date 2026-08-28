@@ -1,4 +1,5 @@
 'use client';
+import { useModalA11y } from '@/hooks/useModalA11y';
 import { createPortal } from 'react-dom';
 
 export type FeedbackModalType = 'success' | 'error';
@@ -22,6 +23,8 @@ export function FeedbackModal({
   buttonText,
   onAction
 }: FeedbackModalProps) {
+  const dialogRef = useModalA11y<HTMLDivElement>(isOpen, onClose);
+
   if (!isOpen || typeof document === 'undefined') return null;
 
   const isSuccess = type === 'success';
@@ -36,7 +39,14 @@ export function FeedbackModal({
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-xl shadow-xl w-[400px] p-6 flex flex-col items-center text-center animate-in fade-in zoom-in duration-200">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="feedback-modal-title"
+        tabIndex={-1}
+        className="bg-white rounded-xl shadow-xl w-[400px] p-6 flex flex-col items-center text-center animate-in fade-in zoom-in duration-200"
+      >
         <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 ${isSuccess ? 'bg-green-100' : 'bg-red-100'}`}>
           {isSuccess ? (
             <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -47,7 +57,7 @@ export function FeedbackModal({
           )}
         </div>
         
-        <h3 className="text-lg font-bold text-gray-900 mb-2">{title}</h3>
+        <h3 id="feedback-modal-title" className="text-lg font-bold text-gray-900 mb-2">{title}</h3>
         <p className="text-sm text-gray-500 mb-6">{message}</p>
         
         <button 

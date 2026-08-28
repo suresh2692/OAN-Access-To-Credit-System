@@ -1,7 +1,7 @@
 'use client';
 
-import { History, Check, Clock, XCircle, MapPin } from 'lucide-react';
 import { useAppSelector } from '@/store/hooks';
+import { Check, Clock, History, MapPin, XCircle } from 'lucide-react';
 import { selectVisitState } from '../store/visitSlice';
 
 export function VisitHistoryCard() {
@@ -57,7 +57,7 @@ export function VisitHistoryCard() {
                             if (!isNaN(d.getTime())) {
                                 formattedDate = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
                             }
-                        } catch(e) {}
+                        } catch {}
 
                         const locationText = visit.meeting_location || (visit.region ? `${visit.region}, ${visit.zone}` : '');
 

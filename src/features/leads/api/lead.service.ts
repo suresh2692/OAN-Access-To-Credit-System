@@ -1,54 +1,100 @@
-import { logger } from '@/lib/logger';
-import { httpStatusToErrorCode } from '@/lib/api/apiErrors';
 import type {
-  Lead,
-  GetLeadsParams,
-  GetLeadsResponse,
-  LeadSummaryResponse,
-  VisitSchedule,
-  RawLead,
-  AssignableUser,
-  AssignLeadBackendData,
-  UpdateLeadStatusResponseData,
-  LeadStatus,
+    AssignableUser,
+    AssignLeadBackendData, GetLeadsParams,
+    GetLeadsResponse, Lead, LeadStatus, LeadSummaryResponse, RawLead, UpdateLeadStatusResponseData, VisitSchedule
 } from '@/features/leads/types/leads.types';
+import { httpStatusToErrorCode } from '@/lib/api/apiErrors';
+import { logger } from '@/lib/logger';
+
+// TODO: [OAN-452] The visit-schedules list is fetched independently of leads
+// pagination/filters (same start=0&page_length=100 on every call), so it's
+// cached + deduped here rather than re-fetched on every getLeads() call (which
+// otherwise fired on every pagination, filter, and tab change). Call
+// invalidateVisitScheduleCache() after any mutation that changes visit
+// schedules. Remove this whole cache once the backend returns
+// latest_visit_schedule directly on get_leads.
+const VISIT_SCHEDULE_CACHE_TTL_MS = 15_000;
+let visitScheduleCache: { promise: Promise<VisitSchedule[]>; timestamp: number } | null = null;
+
+export function invalidateVisitScheduleCache(): void {
+  visitScheduleCache = null;
+}
+
+// Not tied to any single getLeads() caller's AbortSignal — this is shared,
+// cached data, so one superseded lead-list request aborting must not fail it
+// for every other caller relying on the same cached promise.
+function getVisitSchedules(): Promise<VisitSchedule[]> {
+  const isFresh = visitScheduleCache && Date.now() - visitScheduleCache.timestamp < VISIT_SCHEDULE_CACHE_TTL_MS;
+  if (!isFresh) {
+    // Only clear the cache if it's still THIS entry — a slow/failing request
+    // must not clobber a newer, valid entry that was created after an
+    // explicit invalidateVisitScheduleCache() + fresh successful refetch.
+    const invalidateIfCurrent = () => {
+      if (visitScheduleCache?.promise === promise) visitScheduleCache = null;
+    };
+    const promise: Promise<VisitSchedule[]> = fetch(`/api/proxy/api/method/oan_a2c.api.v1.leads.get_visit_schedules?start=0&page_length=100`)
+      .then(async (res) => {
+        if (!res.ok) {
+          // A transient 4xx/5xx isn't a valid "no schedules" result — don't let it
+          // poison the cache for the full TTL. This call still resolves to [] (matches
+          // the graceful-degradation behavior below) but the next call retries.
+          invalidateIfCurrent();
+          logger.error(`Failed to fetch visit schedules: HTTP ${res.status}`);
+          return [];
+        }
+        try {
+          const json = await res.json() as { message?: { data?: VisitSchedule[] } };
+          return json.message?.data || [];
+        } catch (e) {
+          logger.error('Failed to parse visit schedules', e);
+          return [];
+        }
+      })
+      .catch((e) => {
+        // A network-level failure degrades to "no schedules" just like a bad
+        // HTTP status, rather than failing the whole leads list — the caller's
+        // Promise.all would otherwise reject and blank the entire lead table
+        // just because this secondary enrichment call couldn't be reached.
+        invalidateIfCurrent();
+        logger.error('Failed to fetch visit schedules', e);
+        return [];
+      });
+    visitScheduleCache = { promise, timestamp: Date.now() };
+  }
+  return visitScheduleCache!.promise;
+}
 
 export const leadService = {
   async getLeads(params?: GetLeadsParams, signal?: AbortSignal): Promise<GetLeadsResponse> {
-    const searchParams = new URLSearchParams({
-      start: params?.start?.toString() || '0',
-      page_length: params?.page_length?.toString() || '20',
-      search_query: params?.search_query || '',
-      status: params?.status || '',
-      lead_source: params?.lead_source || '',
-      start_date: params?.start_date || '',
-      end_date: params?.end_date || '',
-    });
+    const searchParams = new URLSearchParams();
+    searchParams.set('start', params?.start?.toString() ?? '0');
+    searchParams.set('page_length', params?.page_length?.toString() ?? '20');
+    if (params?.search_query) searchParams.set('search_query', params.search_query);
+    if (params?.status) searchParams.set('status', params.status);
+    if (params?.lead_source) searchParams.set('lead_source', params.lead_source);
+    if (params?.start_date) searchParams.set('start_date', params.start_date);
+    if (params?.end_date) searchParams.set('end_date', params.end_date);
     // Backend reads min_loan_amount / max_loan_amount (see api-flow-backend.md
     // §4.2 get_leads). Sending min_amount/max_amount is silently ignored — the
     // amount filter is dropped rather than erroring.
-    if (params?.min_amount !== undefined) {
-      searchParams.set('min_loan_amount', params.min_amount.toString());
-    }
-    if (params?.max_amount !== undefined) {
-      searchParams.set('max_loan_amount', params.max_amount.toString());
-    }
-    if (params?.loan_type !== undefined) {
-      searchParams.set('loan_type', params.loan_type);
-    }
-    // Server-side queue scoping: agent email, or the literal 'unassigned'
-    // (api-flow-backend.md §4.2 get_leads `assigned_to`).
-    if (params?.assigned_to) {
-      searchParams.set('assigned_to', params.assigned_to);
-    }
+    if (params?.min_amount !== undefined) searchParams.set('min_loan_amount', params.min_amount.toString());
+    if (params?.max_amount !== undefined) searchParams.set('max_loan_amount', params.max_amount.toString());
+    if (params?.loan_type) searchParams.set('loan_type', params.loan_type);
+    // Its own param, not folded into search_query: `search_query` only ORs over
+    // name/phone/external_id, so appending a region to it guaranteed an empty page.
+    if (params?.region) searchParams.set('region', params.region);
+    if (params?.assigned_to) searchParams.set('assigned_to', params.assigned_to);
+    if (params?.sort_by) searchParams.set('sort_by', params.sort_by);
+    if (params?.sort_order) searchParams.set('sort_order', params.sort_order);
 
-    // TODO: [OAN-452] Temporary client-side join. We are fetching up to 2000 visit schedules because 
-    // the backend get_leads API doesn't currently include the latest visit schedule details.
-    // This should be removed once the backend includes latest_visit_schedule in the lead response.
+    // TODO: [OAN-452] Temporary client-side join. Visit schedules are cached
+    // separately (see getVisitSchedules above) since they're independent of
+    // leads pagination/filters — this should be removed once the backend
+    // includes latest_visit_schedule in the get_leads response.
     const fetchInit = signal ? { signal } : {};
-    const [response, schedulesRes] = await Promise.all([
+    const [response, rawSchedules] = await Promise.all([
       fetch(`/api/proxy/api/method/oan_a2c.api.v1.leads.get_leads?${searchParams.toString()}`, fetchInit),
-      fetch(`/api/proxy/api/method/oan_a2c.api.v1.leads.get_visit_schedules?start=0&page_length=100`, fetchInit)
+      getVisitSchedules()
     ]);
 
     if (!response.ok) {
@@ -64,24 +110,6 @@ export const leadService = {
       };
     };
 
-    let schedulesData: {
-      message?: {
-        data?: VisitSchedule[];
-      };
-    } | null = null;
-    try {
-      if (schedulesRes.ok) {
-        schedulesData = await schedulesRes.json() as {
-          message?: {
-            data?: VisitSchedule[];
-          };
-        };
-      }
-    } catch (e) {
-      logger.error('Failed to parse visit schedules', e);
-    }
-
-    const rawSchedules: VisitSchedule[] = schedulesData?.message?.data || [];
     const sortedSchedules = [...rawSchedules].sort((a: VisitSchedule, b: VisitSchedule) => {
       const dateA = a.creation || '';
       const dateB = b.creation || '';

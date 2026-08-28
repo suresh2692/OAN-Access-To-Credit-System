@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
 import { Search, SlidersHorizontal } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 interface LeadToolbarProps {
   search: string;
@@ -27,6 +27,10 @@ function LeadToolbar({
   const [localSearch, setLocalSearch] = useState(search);
 
   useEffect(() => {
+    // Resyncs the local input value when the committed search prop changes
+    // externally (e.g. cleared elsewhere) — has to stay independently editable
+    // while the user types, so this can't be computed during render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLocalSearch(search);
   }, [search]);
   const tabs = [
@@ -41,7 +45,7 @@ function LeadToolbar({
       <div className="relative flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-[#F1F3F4] bg-white px-5 py-4 rounded-t-2xl">
         {/* Left side: Search input + Search button */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:max-w-lg font-semibold">
-          <div className="relative flex flex-1 items-center rounded-lg border border-[#EDEFF1] bg-[#F6F8FA] px-3 py-2.5">
+          <div className="relative flex flex-1 items-center rounded-lg border border-[#EDEFF1] bg-[#F6F8FA] px-3 py-2.5 focus-within:ring-[.08em] focus-within:ring-green-600 focus-within:ring-offset-1">
             <Search size={18} className="absolute left-3 text-[#9CA3AF]" />
             <input
               type="text"

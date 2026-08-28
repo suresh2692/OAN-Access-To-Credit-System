@@ -1,5 +1,5 @@
-import { FileText, CheckCircle2, XCircle, Users, ClipboardList, FileCheck, Clock } from 'lucide-react';
 import { KpiStat } from '@/features/leads/types/leads.types';
+import { CheckCircle2, ClipboardList, Clock, FileCheck, FileText, Users, XCircle } from 'lucide-react';
 
 interface LeadKpiCardProps {
   stat: KpiStat;

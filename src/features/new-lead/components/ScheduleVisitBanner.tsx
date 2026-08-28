@@ -1,7 +1,7 @@
 "use client";
 
-import { MapPin, Phone } from 'lucide-react';
 import { useAppSelector } from '@/store/hooks';
+import { MapPin, Phone } from 'lucide-react';
 import { selectFarmerState } from '..';
 
 export function ScheduleVisitBanner() {

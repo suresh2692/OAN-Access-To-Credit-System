@@ -1,5 +1,6 @@
-import { GENDER_OPTIONS } from './loans.constants';
+import type { LucideIcon } from 'lucide-react';
 import { type LoanApplicationFull } from '../api/loan.service';
+import { GENDER_OPTIONS } from './loans.constants';
 
 export type FarmerDetails = Record<string, string>;
 
@@ -19,7 +20,7 @@ export interface SectionConfig {
   title: string;
   fields: FieldConfig[];
   gridCols?: string;
-  icon?: any;
+  icon?: LucideIcon;
   iconColor?: string;
 }
 

@@ -58,7 +58,13 @@ pipeline {
           sh '''#!/usr/bin/env bash
             set -euo pipefail
             IMAGE_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
+            # --no-cache: never reuse a layer from an earlier build on this
+            #   shared agent, so every image is built from the checked-out tree.
+            # --pull: re-resolve the `node:24` base rather than building on a
+            #   copy the agent may have cached weeks ago, which would keep the
+            #   image pinned to an unpatched base indefinitely.
             DOCKER_BUILDKIT=1 docker build \
+              --no-cache --pull \
               --build-arg API_BASE_URL="${API_BASE_URL}" \
               --tag ${IMAGE_URI}:${IMMUTABLE_TAG} \
               --tag ${IMAGE_URI}:${MOVING_TAG} \

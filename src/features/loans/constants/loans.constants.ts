@@ -1,24 +1,73 @@
 export interface StatusConfig {
   dot: string;
   badge: string;
-  tone: 'success' | 'info' | 'danger' | 'neutral';
+  tone: LoanStatusTone;
 }
 
-export const STATUS_CFG: Record<string, StatusConfig> = {
-  'Approved':        { dot: 'bg-green-500',  badge: 'bg-green-50 text-green-700 border-green-200',   tone: 'success' },
-  'Pending Review':  { dot: 'bg-blue-500',   badge: 'bg-blue-50 text-blue-700 border-blue-200',     tone: 'info'    },
-  'Action Required': { dot: 'bg-red-500',    badge: 'bg-red-50 text-red-600 border-red-200',        tone: 'danger'  },
-  'Draft':           { dot: 'bg-slate-400',  badge: 'bg-slate-50 text-slate-600 border-slate-200',  tone: 'neutral' },
+export type LoanStatusTone = 'success' | 'info' | 'danger' | 'neutral';
+
+/**
+ * The dot and pill classes for each tone — the one place these colours are written.
+ *
+ * `badge` deliberately omits the `border` utility: every consumer adds it alongside
+ * its own radius and padding.
+ */
+export const TONE_CFG: Record<LoanStatusTone, { dot: string; badge: string }> = {
+  neutral: { dot: 'bg-slate-400', badge: 'bg-slate-50 text-slate-600 border-slate-200' },
+  info:    { dot: 'bg-blue-500',  badge: 'bg-blue-50 text-blue-700 border-blue-200'    },
+  success: { dot: 'bg-green-500', badge: 'bg-green-50 text-green-700 border-green-200' },
+  danger:  { dot: 'bg-red-500',   badge: 'bg-red-50 text-red-600 border-red-200'       },
 };
 
-// All tabs including "All"
-export const LOAN_STATUSES = ['All', 'Pending Review', 'Action Required', 'Approved', 'Draft'] as const;
+/**
+ * The four states `A2C Loan Application.status` can hold, in lifecycle order.
+ *
+ * These are the A2C Loan Application Workflow's states — platform constants,
+ * identical for every bank. They are the vocabulary of the `archetype` filter only;
+ * what a row's badge *says* is `status`, which the backend resolves to the owning
+ * bank's own name for the step.
+ *
+ * `get_all_loans` validates `status` against exactly this list and answers 400 for
+ * anything else, so no other value may ever be used as a filter value. The names
+ * this file used to carry — Processing / Approved / Pending Review / Action Required
+ * / Draft — are from the model the archetype refactor replaced, and every list that
+ * offered them filtered the dashboard into a validation error.
+ */
+export const LOAN_ARCHETYPE_STATUSES = ['Active', 'In Transition', 'Completed', 'Cancelled'] as const;
 
-// Statuses an agent can transition a loan to
-export const UPDATABLE_STATUSES = ['Pending Review', 'Action Required', 'Approved', 'Draft'] as const;
+export type LoanArchetypeStatus = (typeof LOAN_ARCHETYPE_STATUSES)[number];
+
+export const STATUS_CFG: Record<string, StatusConfig> = {
+  'Active':        { ...TONE_CFG.neutral, tone: 'neutral' },
+  'In Transition': { ...TONE_CFG.info,    tone: 'info'    },
+  'Completed':     { ...TONE_CFG.success, tone: 'success' },
+  'Cancelled':     { ...TONE_CFG.danger,  tone: 'danger'  },
+};
+
+/** Dot + pill classes for a row, from the tone its mapper already computed. */
+export function loanToneCfg(tone: string | undefined): { dot: string; badge: string } {
+  return TONE_CFG[(tone ?? '') as LoanStatusTone] ?? TONE_CFG.neutral;
+}
+
+/** Tone for a row, from its archetype status. Unknown values read as neutral. */
+export function loanStatusTone(status: string | undefined): LoanStatusTone {
+  return STATUS_CFG[status ?? '']?.tone ?? 'neutral';
+}
 
 // ─── Pagination ───────────────────────────────────────────────────────────────
 export const PAGE_SIZE = 10;
+// ─── Loan amount buckets ──────────────────────────────────────────────────────
+// Moved to `@/lib/loanAmountRanges` so the leads filters can share them too — a
+// feature may not import another feature's internals. Re-exported here so the
+// existing loans/bank-agent call sites keep importing from one place.
+export {
+  ALL_AMOUNTS_INDEX,
+  LOAN_AMOUNT_BUCKET_LABELS,
+  LOAN_AMOUNT_RANGES,
+  loanAmountCeilingLabel,
+  loanAmountRange,
+  loanAmountRangeIndex,
+} from '@/lib/loanAmountRanges';
 
 // ─── Loan metadata options ────────────────────────────────────────────────────
 export const LOAN_TYPES = [
@@ -38,47 +87,12 @@ export const LOAN_TERMS = [
   '36 Months (3 Years)',
 ] as const;
 
-// ─── Reason options per target status ────────────────────────────────────────
-export const STATUS_UPDATE_REASONS: Record<string, string[]> = {
-  'Approved': [
-    'Meets all criteria',
-    'Collateral verified',
-    'Credit score passed',
-    'Field visit confirmed',
-    'Other',
-  ],
-  'Pending Review': [
-    'Awaiting documents',
-    'Under credit review',
-    'Referred for second opinion',
-    'Field visit scheduled',
-    'Other',
-  ],
-  'Action Required': [
-    'Missing documents',
-    'Incomplete application',
-    'Collateral insufficient',
-    'Signature required',
-    'Other',
-  ],
-  'Draft': [
-    'Returned for corrections',
-    'Incomplete submission',
-    'Withdrawn by applicant',
-    'Other',
-  ],
-};
-
 // ─── Dashboard date range options ─────────────────────────────────────────────
-export const DATE_RANGE_OPTIONS = [
-  { label: 'Today',         value: 'today'     },
-  { label: 'Yesterday',     value: 'yesterday' },
-  { label: 'Last 7 Days',   value: 'last7'     },
-  { label: 'Last 30 Days',  value: 'last30'    },
-  { label: 'Last 3 Months', value: 'last3m'    },
-  { label: 'Last 6 Months', value: 'last6m'    },
-  { label: 'Last Year',     value: 'last1y'    },
-] as const;
+// Deliberately absent. A preset-window dropdown used to be declared here, never
+// rendered, while loanDashboardSlice defaulted to 'last30' — so applications older
+// than a month were unreachable with nothing on screen to explain the gap. The
+// From/To + quick-date control inside <LoanAdvancedFilters/> is the one date filter,
+// and it shows what it is doing.
 
 export const STEP_META = [
   { title: 'Loan Details',               subtitle: 'Capture information about the requested loan and farming activities.' },
@@ -121,3 +135,43 @@ export const AGRONOMIC_FARMLAND_OPTIONS = ['Capacity for production', 'Good', 'A
 export const LAND_OWNERSHIP_OPTIONS     = ['Security of access', 'Owned', 'Leased', 'Shared'];
 export const SOIL_FERTILITY_OPTIONS     = ['Future yield potential', 'High', 'Medium', 'Low'];
 export const MOISTURE_LEVEL_OPTIONS     = ['Irrigation / drought risks', 'Well-irrigated', 'Rain-fed', 'Drought-prone'];
+
+// ─── Advanced-filter status options ──────────────────────────────────────────
+// Both bank portals and the dev-agent dashboard open the same <LoanAdvancedFilters/>
+// drawer over the same slice; only the slice of the lifecycle each one can act on
+// differs. Keeping these lists here — instead of a private copy of the whole
+// drawer per portal — is what stops them drifting apart again: previously the
+// seller copy had picked up two fixes (Clear-all refreshing the table, and the
+// active-filter count) that the dev-agent copy never received.
+export interface FilterStatusOption {
+  /** What the business calls the status. */
+  label: string;
+  /** The status value the API filters on. */
+  value: string;
+  dot: string;
+}
+
+const statusOption = (status: LoanArchetypeStatus): FilterStatusOption => ({
+  label: status,
+  value: status,
+  dot: STATUS_CFG[status]?.dot ?? 'bg-slate-400',
+});
+
+/**
+ * Status options for lists that can see the whole lifecycle — the development-agent
+ * dashboard and the farmer's own applications.
+ *
+ * Derived from the archetype list rather than hand-written: the two lists that used to
+ * live here differed only in which pre-archetype names they guessed at, and both made
+ * `get_all_loans` answer 400.
+ */
+export const LOAN_FILTER_STATUS_OPTIONS: readonly FilterStatusOption[] =
+  LOAN_ARCHETYPE_STATUSES.map(statusOption);
+
+// There is deliberately no bank-side counterpart to the list above.
+//
+// The bank portals filter on their own pipeline, read live from the store and
+// passed to the drawer as `statusOptions`. A stage label is tenant free text and
+// `get_all_loans` 400s on anything the caller's stages do not define, so a fixed
+// bank list could only ever be a filter that empties the table.
+

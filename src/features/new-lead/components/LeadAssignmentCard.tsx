@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { useAppSelector, useAppDispatch } from '@/store/hooks';
-import { selectAssignmentState, selectIsLeadFinalized, assignLeadThunk } from '..';
+import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { Edit } from 'lucide-react';
-import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
+import { useParams } from 'next/navigation';
+import { useState } from 'react';
+import { assignLeadThunk, selectAssignmentState, selectIsLeadFinalized } from '..';
+import type { AssignableUser } from './modals/AssignOwnerModal';
 
 const AssignOwnerModal = dynamic(() => import('./modals/AssignOwnerModal'), {
   ssr: false,
@@ -19,7 +20,7 @@ export function LeadAssignmentCard() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [errorFeedback, setErrorFeedback] = useState<string | null>(null);
 
-  const handleAssign = async (user: any) => {
+  const handleAssign = async (user: AssignableUser) => {
     const activeLeadId = params?.id as string;
     if (!activeLeadId) {
       setErrorFeedback("Missing Lead ID");

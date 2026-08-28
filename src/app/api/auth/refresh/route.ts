@@ -1,14 +1,59 @@
-import { logger } from '@/lib/logger';
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
+import { AUTH_MESSAGES } from '@/lib/authMessages';
+import { getClientIp } from '@/lib/clientIp';
+import { checkCsrf } from '@/lib/csrf';
 import { env } from '@/lib/env';
+import { logger } from '@/lib/logger';
+import { checkRateLimit, rateLimitedResponse } from '@/lib/rateLimit';
+import { RATE_LIMITS } from '@/lib/securityConfig';
+import {
+    clearSessionCookies,
+    isIdleExpired,
+    readRememberMe,
+    REFRESH_TOKEN_COOKIE,
+    setSessionCookies,
+} from '@/lib/session';
+import type { NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
+
+/** Ends the session in the browser and tells the client to sign in again. */
+function endSession(message: string, status = 401): NextResponse {
+  const response = NextResponse.json({ message }, { status });
+  clearSessionCookies(response);
+  return response;
+}
 
 export async function POST(request: NextRequest) {
   try {
-    const refreshToken = request.cookies.get('refresh_token')?.value;
+    // CSRF: this endpoint mints a fresh access token from a cookie the browser
+    // sends automatically, so without an origin check any site could keep a
+    // session warm — or force a token rotation that logs the real tab out.
+    const csrfError = checkCsrf(request);
+    if (csrfError) return csrfError;
+
+    const clientIp = getClientIp(request);
+    const limit = checkRateLimit(
+      `refresh:${clientIp}`,
+      RATE_LIMITS.refresh.limit,
+      RATE_LIMITS.refresh.windowMs
+    );
+    if (!limit.allowed) {
+      logger.security(`Refresh rate limit exceeded for ${clientIp}`);
+      return rateLimitedResponse(limit.retryAfterSeconds);
+    }
+
+    const refreshToken = request.cookies.get(REFRESH_TOKEN_COOKIE)?.value;
 
     if (!refreshToken) {
-      return NextResponse.json({ message: 'Missing refresh token' }, { status: 401 });
+      return endSession(AUTH_MESSAGES.sessionExpired);
+    }
+
+    // An idle session must not be revivable. `fetchApi` retries any 401 by
+    // calling this route, so without this check a background poll firing after
+    // the idle window would hand back a fresh token and quietly undo the
+    // timeout on an unattended screen.
+    if (isIdleExpired(request)) {
+      logger.security('Refresh refused: session exceeded the idle timeout');
+      return endSession(AUTH_MESSAGES.sessionExpired);
     }
 
     // Call external API to refresh the JWT
@@ -17,6 +62,7 @@ export async function POST(request: NextRequest) {
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
+        'X-Forwarded-For': clientIp,
       },
       body: JSON.stringify({ refresh_token: refreshToken }),
     });
@@ -24,22 +70,14 @@ export async function POST(request: NextRequest) {
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      logger.warn('Token refresh failed on backend, status:', response.status);
-      let errorMessage = 'Refresh token has expired or is invalid.';
-      if (typeof data.message === 'string') {
-        errorMessage = data.message;
-      } else if (data.message && typeof data.message === 'object') {
-        errorMessage = data.message.message || data.message.error || JSON.stringify(data.message);
-      }
-
-      // Clear the cookies since the session is now invalid
-      const nextResponse = NextResponse.json(
-        { message: errorMessage },
-        { status: 401 }
+      // Logged, not returned: the backend distinguishes "expired", "revoked" and
+      // "unknown token", and relaying that tells a caller holding a stolen token
+      // which of those it is holding.
+      logger.security(
+        `Token refresh failed on backend, status ${response.status}:`,
+        typeof data?.message === 'string' ? data.message : JSON.stringify(data?.message ?? data)
       );
-      nextResponse.cookies.set('auth_token', '', { path: '/', maxAge: 0 });
-      nextResponse.cookies.set('refresh_token', '', { path: '/', maxAge: 0 });
-      return nextResponse;
+      return endSession(AUTH_MESSAGES.sessionExpired);
     }
 
     const token = data.message?.data?.token as string | undefined;
@@ -47,7 +85,7 @@ export async function POST(request: NextRequest) {
 
     if (!token || !newRefreshToken) {
       logger.error('Invalid token payload returned from refresh API');
-      return NextResponse.json({ message: 'Invalid token payload' }, { status: 500 });
+      return endSession(AUTH_MESSAGES.sessionExpired);
     }
 
     const nextResponse = NextResponse.json({
@@ -55,26 +93,20 @@ export async function POST(request: NextRequest) {
       message: 'Token refreshed successfully',
     });
 
-    const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax' as const,
-      path: '/',
-    };
-
-    nextResponse.cookies.set('auth_token', token, {
-      ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60, // 7 days Max age for the cookie container
-    });
-
-    nextResponse.cookies.set('refresh_token', newRefreshToken, {
-      ...cookieOptions,
-      maxAge: 30 * 24 * 60 * 60, // 30 days max container age
+    // Reissue on the *original* session's terms. The remember-me choice is read
+    // back from its own cookie rather than assumed: previously this route always
+    // applied the 30-day lifetime, so the first refresh silently promoted a
+    // 24-hour session into a month-long one. The backend does the same on its
+    // side — it stores `remember_me` on the token row and honours it on rotation.
+    setSessionCookies(nextResponse, {
+      token,
+      refreshToken: newRefreshToken,
+      rememberMe: readRememberMe(request),
     });
 
     return nextResponse;
   } catch (error) {
     logger.error('Refresh Proxy Error:', error);
-    return NextResponse.json({ message: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ message: AUTH_MESSAGES.sessionExpired }, { status: 500 });
   }
 }

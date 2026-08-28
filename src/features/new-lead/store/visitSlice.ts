@@ -1,13 +1,49 @@
-import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import { newLeadService, VisitScheduleAPI, ScheduleVisitResponse, UpdateVisitScheduleStatusResponse } from '../api/newLead.service';
-import { initializeLead, clearForm } from './actions';
-import type { RootState } from '@/store';
+// eslint-disable-next-line boundaries/dependencies -- TODO (2026-08-23): needs to be fixed later; hiding for now as this existed before our changes
+import { invalidateVisitScheduleCache } from '@/features/leads/api/lead.service';
 import { normalizeLeadId } from '@/lib/utils';
+import type { RootState } from '@/store';
+import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { newLeadService, ScheduleVisitResponse, UpdateVisitScheduleStatusResponse, VisitScheduleAPI } from '../api/newLead.service';
+import { clearForm, initializeLead } from './actions';
 
+/**
+ * The visit currently on the lead — the one "Reschedule" reopens.
+ *
+ * This used to hold only `{ id, date, location }`, so the reschedule form could
+ * seed nothing but the date and the agent had to retype the place they had
+ * already chosen. The place is four separate fields on A2C Visit Schedule
+ * (`location` is only the free-text meeting point), and every one of them comes
+ * back from `get_visit_schedules` — so all of them are kept here.
+ *
+ * Plain `string` rather than `string | undefined` on the optional members:
+ * `exactOptionalPropertyTypes` is on, so a field that may be absent from the API
+ * row is normalised to '' at the boundary instead of being written as undefined.
+ */
 interface VisitSchedule {
   id?: string;
+  /**
+   * The lead this visit belongs to.
+   *
+   * There is one `visitSchedule` for the whole app, so between navigating away
+   * from one lead and `get_visit_schedules` answering for the next it still
+   * holds the previous lead's visit. Without this, the reschedule form had no
+   * way to tell that apart from its own data and seeded itself from it.
+   */
+  leadId?: string;
   date: string;
+  /** 'hh:mm AM' — the format TimePickerField reads and writes. */
+  time?: string;
+  /**
+   * Display string for the visit card: the meeting point, or the region/zone
+   * when none was given. Derived — never send it back as `meeting_location`.
+   */
   location?: string;
+  /** The raw `meeting_location`, for seeding the reschedule form. */
+  meetingLocation?: string;
+  region?: string;
+  zone?: string;
+  woreda?: string;
+  kebele?: string;
 }
 
 interface VisitState {
@@ -45,7 +81,7 @@ export function formatTimeString(time: string): string {
   const match = time.trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i);
   if (!match) throw new Error(`Invalid time format: "${time}"`);
 
-  let [, hours = '00', minutes = '00', seconds = '00', modifier] = match;
+  const [, hours = '00', minutes = '00', seconds = '00', modifier] = match;
   let h = parseInt(hours, 10);
 
   if (modifier) {
@@ -54,6 +90,28 @@ export function formatTimeString(time: string): string {
   }
 
   return `${h.toString().padStart(2, '0')}:${minutes}:${seconds}`;
+}
+
+/**
+ * Inverse of `formatTimeString`: the API's 'HH:mm:ss' back into the 'hh:mm AM'
+ * that TimePickerField parses. Needed so a saved visit can be reopened for
+ * rescheduling with its time already filled in.
+ *
+ * Returns '' for anything unparseable — a visit with a missing or malformed
+ * time should reopen with an empty picker, not block the form.
+ */
+export function toDisplayTime(time?: string): string {
+  const match = time?.trim().match(/^(\d{1,2}):(\d{2})/);
+  const rawHours = match?.[1];
+  const minutes = match?.[2];
+  if (!rawHours || !minutes) return '';
+
+  const hours24 = parseInt(rawHours, 10);
+  if (Number.isNaN(hours24) || hours24 > 23) return '';
+
+  const period = hours24 >= 12 ? 'PM' : 'AM';
+  const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
+  return `${hours12.toString().padStart(2, '0')}:${minutes} ${period}`;
 }
 
 
@@ -78,6 +136,10 @@ export const scheduleVisitThunk = createAsyncThunk<{
         notes: payload.agenda,
       };
       const response = await newLeadService.scheduleVisit(apiPayload);
+      // Colocated with the mutation (rather than a distant slice matching this
+      // thunk's action type) so a future visit-mutating thunk added here can't
+      // forget to invalidate the leads list's cached schedules.
+      invalidateVisitScheduleCache();
       return { response, payload };
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : 'Unknown Cause: Failed to schedule visit');
@@ -96,6 +158,7 @@ export const updateVisitScheduleStatusThunk = createAsyncThunk<{
         schedule_id: payload.scheduleId,
         status: payload.status,
       });
+      invalidateVisitScheduleCache();
       return { response, payload };
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : 'Unknown Cause: Failed to update visit schedule status');
@@ -108,7 +171,10 @@ const visitSlice = createSlice({
   initialState,
   reducers: {
     setVisitSchedule(state, action: PayloadAction<string>) {
-      state.visitSchedule = { date: action.payload };
+      // Spread, not replace: this only carries the date from the inline picker on
+      // the lead card, and overwriting the whole object dropped the place and
+      // time loaded from the server — which is exactly what Reschedule needs.
+      state.visitSchedule = { ...state.visitSchedule, date: action.payload };
     },
     clearVisitState() {
       return initialState;
@@ -135,8 +201,15 @@ const visitSlice = createSlice({
             if (latest) {
               state.visitSchedule = {
                 id: latest.name,
+                leadId: latest.lead ?? '',
                 date: latest.visit_date,
-                location: latest.meeting_location || (latest.region ? `${latest.region}, ${latest.zone}` : '')
+                time: toDisplayTime(latest.visit_time),
+                location: latest.meeting_location || (latest.region ? `${latest.region}, ${latest.zone}` : ''),
+                meetingLocation: latest.meeting_location ?? '',
+                region: latest.region ?? '',
+                zone: latest.zone ?? '',
+                woreda: latest.woreda ?? '',
+                kebele: latest.kebele ?? '',
               };
             } else {
               state.visitSchedule = null;
@@ -163,8 +236,16 @@ const visitSlice = createSlice({
         const p = action.payload.payload;
         const response = action.payload.response;
         state.visitSchedule = {
+          id: response.schedule_id,
+          leadId: p.leadId,
           date: p.date,
-          location: p.location || (p.region ? `${p.region}, ${p.zone}` : '')
+          time: p.time,
+          location: p.location || (p.region ? `${p.region}, ${p.zone}` : ''),
+          meetingLocation: p.location,
+          region: p.region,
+          zone: p.zone,
+          woreda: p.woreda,
+          kebele: p.kebele,
         };
         const newVisit: VisitScheduleAPI = {
           name: response.schedule_id,

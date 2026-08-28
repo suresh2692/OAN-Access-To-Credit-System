@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { X, Check } from 'lucide-react';
+import { useModalA11y } from '@/hooks/useModalA11y';
+import { Check, X } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
 
 interface HavingTroubleModalProps {
   isOpen: boolean;
@@ -12,25 +13,7 @@ export function HavingTroubleModal({ isOpen, onClose }: HavingTroubleModalProps)
   const [inputValue, setInputValue] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
-
-  // Close modal on Escape key
-  useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    if (isOpen) {
-      document.addEventListener('keydown', handleEscape);
-      // Prevent body scrolling
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-
-    return () => {
-      document.removeEventListener('keydown', handleEscape);
-      document.body.style.overflow = 'unset';
-    };
-  }, [isOpen, onClose]);
+  const dialogRef = useModalA11y<HTMLDivElement>(isOpen, onClose);
 
   // Reset state when modal closes
   useEffect(() => {
@@ -60,11 +43,13 @@ export function HavingTroubleModal({ isOpen, onClose }: HavingTroubleModalProps)
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 animate-in fade-in duration-200">
-      <div 
+      <div
+        ref={dialogRef}
         className="relative w-full max-w-[448px] rounded-[16px] bg-white p-6 sm:p-8 shadow-2xl animate-in zoom-in-95 duration-200"
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
+        tabIndex={-1}
       >
         <button
           onClick={onClose}
@@ -81,7 +66,7 @@ export function HavingTroubleModal({ isOpen, onClose }: HavingTroubleModalProps)
             </div>
             <h3 className="mb-2 text-[20px] sm:text-[24px] font-bold text-[#111827]">Check your inbox</h3>
             <p className="mb-8 text-[#6B7280] text-[14px] sm:text-[16px] leading-relaxed">
-              We've sent a recovery link to <span className="font-semibold text-gray-900 break-all">{inputValue}</span>. Please check your messages.
+              We&apos;ve sent a recovery link to <span className="font-semibold text-gray-900 break-all">{inputValue}</span>. Please check your messages.
             </p>
             <button
               onClick={onClose}

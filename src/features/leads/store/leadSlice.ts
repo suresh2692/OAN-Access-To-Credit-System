@@ -1,14 +1,14 @@
-import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
-import type { RootState } from '../../../store';
 import { leadService } from '@/features/leads/api/lead.service';
-import type { GetLeadsParams, Lead, LeadSummaryResponse, LeadStatus } from '@/features/leads/types/leads.types';
+import type { GetLeadsParams, Lead, LeadStatus, LeadSummaryResponse } from '@/features/leads/types/leads.types';
 import {
-  updateLeadStatusThunk,
-  updateVisitScheduleStatusThunk,
-  fetchLeadDetailsThunk,
-  scheduleVisitThunk,
+    fetchLeadDetailsThunk,
+    scheduleVisitThunk, updateLeadStatusThunk,
+    updateVisitScheduleStatusThunk
 } from '@/features/new-lead';
+import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
+import type { RootState } from '../../../store';
 
+import { withCurrentSort } from '@/lib/filterSort';
 import { normalizeLeadId } from '@/lib/utils';
 
 function findLeadById(leads: Lead[], id: string): Lead | undefined {
@@ -49,11 +49,40 @@ export interface AdvFilters {
   quickDate: string;
   dateFrom: string;
   dateTo: string;
-  location: string;
+  /** Region only — see `region` on GetLeadsParams for why one field, not three. */
+  region: string;
   minAmount: number | null;
   maxAmount: number | null;
   loanType: string[];
   leadSources: string[];
+  sortBy?: 'loan_amount' | 'creation' | undefined;
+  sortOrder?: 'asc' | 'desc' | undefined;
+}
+
+/** The filter half of `AdvFilters`, with the sort deliberately excluded. */
+export type AdvFilterValues = Omit<AdvFilters, 'sortBy' | 'sortOrder'>;
+
+/**
+ * The filter half of the current state, ready to hand back to `setAdvFilters`
+ * with one field changed.
+ *
+ * Fields are listed out rather than rest-destructured so adding one to `AdvFilters`
+ * is a type error here instead of a value that silently stops being sent.
+ */
+export function advFilterValues(filters: AdvFilters): AdvFilterValues {
+  return {
+    statuses: filters.statuses,
+    quickDate: filters.quickDate,
+    dateFrom: filters.dateFrom,
+    dateTo: filters.dateTo,
+    // Trimmed: matched from the start of the region name, so a whitespace-only
+    // value is truthy but can never match — an empty table with nothing to clear.
+    region: filters.region.trim(),
+    minAmount: filters.minAmount,
+    maxAmount: filters.maxAmount,
+    loanType: filters.loanType,
+    leadSources: filters.leadSources,
+  };
 }
 
 interface LeadState {
@@ -77,7 +106,7 @@ const initialFilters: AdvFilters = {
   quickDate: '',
   dateFrom: '',
   dateTo: '',
-  location: '',
+  region: '',
   minAmount: null,
   maxAmount: null,
   loanType: [],
@@ -130,14 +159,21 @@ const leadSlice = createSlice({
     setColCallTimeFilter(state, action: PayloadAction<string[]>) {
       state.advFilters.loanType = action.payload;
     },
-    setAdvFilters(state, action: PayloadAction<AdvFilters>) {
-      state.advFilters = action.payload;
+    setAdvFilters(state, action: PayloadAction<AdvFilterValues>) {
+      state.advFilters = withCurrentSort(action.payload, state.advFilters);
+    },
+    setSort(state, action: PayloadAction<{ sortBy?: 'loan_amount' | 'creation' | undefined; sortOrder?: 'asc' | 'desc' | undefined }>) {
+      state.advFilters.sortBy = action.payload.sortBy;
+      state.advFilters.sortOrder = action.payload.sortOrder;
     },
     resetFilters(state) {
       state.search = '';
       state.activeTab = 'all';
       state.dateFilter = 'All Time';
-      state.advFilters = initialFilters;
+      // The sort survives a filter reset, the same way it does on the loans
+      // dashboard: it is a view preference, not a filter, and the column header
+      // keeps showing its arrow either way.
+      state.advFilters = withCurrentSort(initialFilters, state.advFilters);
     },
   },
   extraReducers: (builder) => {
@@ -186,6 +222,7 @@ const leadSlice = createSlice({
       .addMatcher(
         updateVisitScheduleStatusThunk.fulfilled.match,
         (state, action) => {
+          // Cache invalidation lives at the mutation site in visitSlice.ts.
           const { leadId, status } = action.payload.payload;
           const lead = findLeadById(state.leads, leadId);
           if (lead) {
@@ -200,6 +237,7 @@ const leadSlice = createSlice({
       .addMatcher(
         scheduleVisitThunk.fulfilled.match,
         (state, action) => {
+          // Cache invalidation lives at the mutation site in visitSlice.ts.
           const { leadId, date } = action.payload.payload;
           const lead = findLeadById(state.leads, leadId);
           if (lead) {
@@ -212,9 +250,9 @@ const leadSlice = createSlice({
         fetchLeadDetailsThunk.fulfilled.match,
         (state, action) => {
           const arg = action.meta.arg;
-          const leadId = typeof arg === 'string' ? arg : arg.leadId;
+          const leadId = typeof arg === 'string' ? arg : arg?.leadId;
           const leadData = action.payload;
-          if (leadData) {
+          if (leadData && leadId) {
             const lead = findLeadById(state.leads, leadId);
             if (lead) {
               lead.name = `${leadData.firstName} ${leadData.lastName}`.trim();
@@ -236,6 +274,7 @@ export const {
   setColStatusFilter,
   setColCallTimeFilter,
   setAdvFilters,
+  setSort,
   resetFilters,
 } = leadSlice.actions;
 
@@ -253,6 +292,28 @@ export const selectDateFilter = (state: RootState) => state.leads.dateFilter;
 export const selectColStatusFilter = (state: RootState) => state.leads.advFilters.statuses;
 export const selectColCallTimeFilter = (state: RootState) => state.leads.advFilters.loanType;
 export const selectAdvFilters = (state: RootState) => state.leads.advFilters;
+export const selectSortBy = (state: RootState) => state.leads.advFilters.sortBy;
+export const selectSortOrder = (state: RootState) => state.leads.advFilters.sortOrder;
+
+/**
+ * Whether any filter is narrowing the list — every surface, not a subset.
+ *
+ * The toolbar used to check only search + the two column filters, so a date range,
+ * an amount bucket, a lead source or a region left the "Clear Filters" affordance
+ * hidden and the empty state claiming there were no leads at all.
+ */
+export const selectHasActiveLeadFilters = (state: RootState) => {
+  const { search, advFilters } = state.leads;
+  return Boolean(search.trim())
+    || advFilters.statuses.length > 0
+    || advFilters.loanType.length > 0
+    || advFilters.leadSources.length > 0
+    || Boolean(advFilters.region.trim())
+    || Boolean(advFilters.dateFrom)
+    || Boolean(advFilters.dateTo)
+    || advFilters.minAmount !== null
+    || advFilters.maxAmount !== null;
+};
 
 // ── Backend Filter Pass-Through ──
 

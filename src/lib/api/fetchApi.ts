@@ -22,6 +22,31 @@ export class ApiError extends Error {
   }
 }
 
+export function extractFieldErrors(error: unknown): Record<string, string> {
+  if (!(error instanceof ApiError)) return {};
+  const details = (error.responseData as { message?: { details?: unknown } } | undefined)?.message?.details;
+  if (!details || typeof details !== 'object') return {};
+  return Object.fromEntries(
+    Object.entries(details).filter(([, v]) => typeof v === 'string')
+  ) as Record<string, string>;
+}
+
+/**
+ * Fallback copy for a failed request, used when the response carries no usable
+ * application message.
+ *
+ * The old fallback was `API Request failed with status <n>`, which told the
+ * reader nothing they could act on. These say what happened in terms of what to
+ * do next, and none of them reveal anything about the backend.
+ */
+function genericMessageForStatus(status: number): string {
+  if (status === 429) return 'Too many requests. Please wait a moment and try again.';
+  if (status === 404) return 'We could not find what you were looking for.';
+  if (status >= 500) return 'The server ran into a problem. Please try again shortly.';
+  if (status >= 400) return 'We could not complete that request. Please check your input and try again.';
+  return 'Something went wrong. Please try again.';
+}
+
 let activeRefresh: Promise<boolean> | null = null;
 
 async function refreshSession(): Promise<boolean> {
@@ -31,7 +56,7 @@ async function refreshSession(): Promise<boolean> {
       headers: { 'Content-Type': 'application/json' },
     });
     return res.ok;
-  } catch (e) {
+  } catch {
     return false;
   }
 }
@@ -51,12 +76,13 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 1
     const response = await fetch(url, { ...options, signal: controller.signal });
     clearTimeout(timeoutId);
     return response;
-  } catch (error: any) {
+  } catch (error) {
     clearTimeout(timeoutId);
-    if (error.name === 'AbortError' && options.signal?.aborted) {
+    const err = error as { name?: string; message?: string };
+    if (err.name === 'AbortError' && options.signal?.aborted) {
       throw error; // Intentional abort from frontend (e.g. unmount)
     }
-    if (error.message === 'TimeoutError' || error.name === 'TimeoutError' || error.name === 'AbortError') {
+    if (err.message === 'TimeoutError' || err.name === 'TimeoutError' || err.name === 'AbortError') {
       throw new ApiError('The server is taking too long to respond. Please try again.', null, 408);
     }
     throw new ApiError('Network error. Please check your connection.', null, 0);
@@ -101,8 +127,25 @@ export async function fetchApi(path: string, options: RequestInit = {}) {
   let responseData;
   try {
     responseData = await response.json();
-  } catch (e) {
-    if (!response.ok) throw new Error(`API Request failed with status ${response.status}`);
+  } catch (error) {
+    // A caller abort that lands after the response headers but before the body
+    // has been read rejects *here*, not in `fetchWithTimeout` — that fetch already
+    // resolved and cleared its timeout, so the only signal still able to error the
+    // body stream is the caller's. Swallowing it returned `null`, and callers read
+    // `null?.data` as a missing field — so a cancelled request surfaced as an
+    // '[API Contract Violation]' rather than as an abort. React StrictMode's
+    // double-mount makes this fire on the first render of any list that aborts its
+    // in-flight request on effect cleanup.
+    //
+    // `signal.aborted` alone is not the test, though: a caller can abort in the
+    // same tick that an empty 2xx body fails to parse, and that SyntaxError is
+    // not a cancellation — rethrowing it raw puts a parse error in front of the
+    // user instead of the contract-violation path below. The error has to be the
+    // abort itself, which is the check `fetchWithTimeout` above already makes.
+    const abortReason = options.signal?.aborted ? options.signal.reason : undefined;
+    const isAbort = (error as { name?: string } | null)?.name === 'AbortError' || error === abortReason;
+    if (options.signal?.aborted && isAbort) throw error;
+    if (!response.ok) throw new ApiError(genericMessageForStatus(response.status), null, response.status);
     return null;
   }
 
@@ -115,30 +158,48 @@ export async function fetchApi(path: string, options: RequestInit = {}) {
     }
     // 5xx still throws an ApiError carrying the parsed server message (callers may
     // surface it in a toast); classifyError(error) recognizes it via .status.
-    let errorMsg = `API Request failed with status ${response.status}`;
-    if (responseData?._server_messages) {
-      try {
-        const msgs = JSON.parse(responseData._server_messages);
-        if (Array.isArray(msgs) && msgs.length > 0) {
-          const firstMsg = typeof msgs[0] === 'string' ? JSON.parse(msgs[0]) : msgs[0];
-          if (firstMsg?.message) {
-            errorMsg = firstMsg.message;
-          }
-        }
-      } catch (e) {
-        // ignore
+    //
+    // Note on `_server_messages`: this used to read the error text out of it.
+    // That field is Frappe's raw exception channel — on an unhandled error it
+    // carries the traceback, absolute file paths and, for a failed query, the
+    // SQL — so rendering it put backend internals in front of whoever tripped
+    // the bug. The proxy now strips it before it reaches the browser (see
+    // lib/proxyHeaders.ts), and the message is taken from the app's own
+    // `{status, message, details}` envelope, which is written for people.
+    let errorMsg = genericMessageForStatus(response.status);
+    if (responseData?.message?.details && typeof responseData.message.details === 'object') {
+      const detailEntries = Object.entries(responseData.message.details).filter(([, v]) => Boolean(v));
+      if (detailEntries.length > 0) {
+        errorMsg = detailEntries
+          .map(([k, v]) => `${k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}: ${v}`)
+          .join('. ');
+      } else if (responseData?.message?.message) {
+        errorMsg = responseData.message.message;
       }
     } else if (responseData?.message?.message) {
       errorMsg = responseData.message.message;
-    } else if (responseData?.message) {
-      errorMsg = typeof responseData.message === 'string' ? responseData.message : JSON.stringify(responseData.message);
+    } else if (typeof responseData?.message === 'string') {
+      errorMsg = responseData.message;
     }
+    // A non-string, non-envelope `message` is deliberately not stringified into
+    // the error: JSON.stringify on an unrecognised payload is exactly how raw
+    // backend internals used to end up rendered in a toast. The whole payload is
+    // still attached to the ApiError for callers that need to inspect it.
     throw new ApiError(errorMsg, responseData, response.status);
   }
 
   // Handle "200 OK" application-level errors
   if (responseData?.message?.status === 'error') {
-    throw new ApiError(responseData.message.message || 'Application Error', responseData);
+    let errorMsg = responseData.message.message || 'Application Error';
+    if (responseData.message.details && typeof responseData.message.details === 'object') {
+      const detailEntries = Object.entries(responseData.message.details).filter(([, v]) => Boolean(v));
+      if (detailEntries.length > 0) {
+        errorMsg = detailEntries
+          .map(([k, v]) => `${k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}: ${v}`)
+          .join('. ');
+      }
+    }
+    throw new ApiError(errorMsg, responseData);
   }
 
   return responseData?.message ?? responseData;

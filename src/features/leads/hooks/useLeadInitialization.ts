@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
-import { useAppDispatch, useAppSelector } from '@/store/hooks';
-import { selectLeads, fetchLeads } from '@/features/leads/store/leadSlice';
+import { fetchLeads, selectLeads } from '@/features/leads/store/leadSlice';
+// eslint-disable-next-line boundaries/dependencies -- TODO (2026-08-23): needs to be fixed later; hiding for now as this existed before our changes
 import { initializeLead } from '@/features/new-lead/store/newLeadSlice';
+import { useAppDispatch, useAppSelector } from '@/store/hooks';
+import { useEffect, useRef } from 'react';
 
 /**
  * A custom hook to handle Redux state initialization for a Lead.

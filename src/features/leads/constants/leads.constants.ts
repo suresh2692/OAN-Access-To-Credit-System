@@ -47,11 +47,16 @@ export const DATE_OPTS = ['All Time', 'Last 7 Days', 'Last 30 Days', 'This Month
 export const PAGE_SIZE = 10;
 
 
+// One card per A2C Lead status, in lifecycle order, plus the overall total.
+// Every status the backend counts toward `total` needs a card of its own —
+// `Granted` was missing, so the six tiles silently failed to add up to Overall
+// Leads for any bank that had actually granted one.
 export const KPI_CARDS_LAYOUT = [
   { id: 'total', label: 'Overall Leads' },
   { id: 'active', label: 'Active' },
   { id: 'verified', label: 'Verified' },
   { id: 'processed', label: 'Processed' },
+  { id: 'granted', label: 'Granted' },
   { id: 'rejected', label: 'Rejected' },
   { id: 'dormant', label: 'Dormant' },
 ] as const;

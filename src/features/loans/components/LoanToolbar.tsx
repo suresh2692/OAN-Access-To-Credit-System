@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { Search, SlidersHorizontal } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
-import { selectActiveTab, setActiveTab, setSearchQuery, selectSearchQuery, clearAdvancedFilters, selectTabCounts } from '../store/loanDashboardSlice';
+import { Search, SlidersHorizontal } from 'lucide-react';
+import React, { useState } from 'react';
+import { resetAllFilters, selectActiveTab, selectSearchQuery, selectTabCounts, setActiveTab, setSearchQuery } from '../store/loanDashboardSlice';
 import LoanAdvancedFilters from './LoanAdvancedFilters';
 
 export default function LoanToolbar() {
@@ -14,6 +14,11 @@ export default function LoanToolbar() {
 
   const handleSearch = () => {
     dispatch(setSearchQuery(localSearch));
+  };
+
+  const handleClearFilters = () => {
+    setLocalSearch('');
+    dispatch(resetAllFilters());
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -67,7 +72,7 @@ export default function LoanToolbar() {
             <span className="sm:hidden">Filters</span>
           </button>
           <button
-            onClick={() => dispatch(clearAdvancedFilters())}
+            onClick={handleClearFilters}
             className="text-base font-semibold text-[#16A34A] transition hover:text-[#10883c] whitespace-nowrap"
           >
             Clear Filters
@@ -80,7 +85,7 @@ export default function LoanToolbar() {
           className={getTabClass('all')}
           onClick={() => dispatch(setActiveTab('all'))}
         >
-          All Applications <span className={getBadgeClass('all')}>{tabCounts.all > 0 ? tabCounts.all : '—'}</span>
+          All Applications <span className={getBadgeClass('all')}>{tabCounts != null ? tabCounts.all : '—'}</span>
           {activeTab === 'all' && <span className="absolute bottom-0 left-0 w-full h-[3px] bg-emerald-500 rounded-t-md " />}
         </button>
 
@@ -88,7 +93,7 @@ export default function LoanToolbar() {
           className={getTabClass('my')}
           onClick={() => dispatch(setActiveTab('my'))}
         >
-          My Applications <span className={getBadgeClass('my')}>{tabCounts.my > 0 ? tabCounts.my : '—'}</span>
+          My Applications <span className={getBadgeClass('my')}>{tabCounts != null ? tabCounts.my : '—'}</span>
           {activeTab === 'my' && <span className="absolute bottom-0 left-0 w-full h-[3px] bg-emerald-500 rounded-t-md" />}
         </button>
 
@@ -96,7 +101,7 @@ export default function LoanToolbar() {
           className={getTabClass('unassigned')}
           onClick={() => dispatch(setActiveTab('unassigned'))}
         >
-          Unassigned <span className={getBadgeClass('unassigned')}>{tabCounts.unassigned > 0 ? tabCounts.unassigned : '—'}</span>
+          Unassigned <span className={getBadgeClass('unassigned')}>{tabCounts != null ? tabCounts.unassigned : '—'}</span>
           {activeTab === 'unassigned' && <span className="absolute bottom-0 left-0 w-full h-[3px] bg-emerald-500 rounded-t-md" />}
         </button>
       </div>

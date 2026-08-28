@@ -1,74 +1,30 @@
 // Selectors, actions, and thunks from newLeadSlice
-export {
-  selectNewLeadState,
-  selectActiveLeadId,
-  selectLeadSource,
-  selectLeadStatus,
-  selectLeadSourcesOptions,
-  selectLeadStatusesOptions,
-  selectLoanTypesOptions,
-  selectCreditInfo,
-  selectCallDetails,
-  selectActivities,
-  selectIsSubmitting,
-  selectIsLeadFinalized,
-  initializeLead,
-  setLeadSource,
-  setLeadStatus,
-  addCreditInfo,
-  clearForm,
-  fetchLeadMetadataThunk,
-  fetchCallDetailsThunk,
-  fetchActivitiesThunk,
-  addActivityNoteThunk,
-  fetchCreditInfoThunk,
-  addCreditInfoThunk,
-  fetchLeadProfileThunk,
-  submitNewLeadThunk,
-  updateLeadStatusThunk,
-  selectLeadPhoneNumber,
-  selectLeadFirstName,
-  selectLeadLastName,
-} from './store/newLeadSlice';
-
-// Selectors, actions, thunks, and types from farmerSlice
-export {
-  searchFarmerThunk,
-  fetchLeadDetailsThunk,
-  setFarmerId,
-  updateFarmerDetails,
-  clearFarmerState,
-  selectFarmerState,
-  selectDetailsError,
-  selectIsPollingLong,
-} from './store/farmerSlice';
-export type { FarmerDetails } from './store/farmerSlice';
-
-// Selectors, actions, and thunks from consentSlice
-export {
-  searchFarmerConsent,
-  verifyOtpThunk,
-  submitConsentThunk,
-  clearConsentState,
-  selectConsentState,
-} from './store/consentSlice';
-
-// Selectors, actions, and thunks from visitSlice
-export {
-  fetchVisitSchedulesThunk,
-  scheduleVisitThunk,
-  updateVisitScheduleStatusThunk,
-  setVisitSchedule,
-  clearVisitState,
-  selectVisitState,
-} from './store/visitSlice';
-
 // Selectors, actions, and thunks from assignmentSlice
 export {
-  fetchAssignmentInfoThunk,
-  assignLeadThunk,
-  clearAssignmentState,
-  selectAssignmentState,
+    assignLeadThunk,
+    clearAssignmentState, fetchAssignmentInfoThunk, selectAssignmentState
 } from './store/assignmentSlice';
+// Selectors, actions, thunks, and types from farmerSlice
+export {
+    clearFarmerState, fetchLeadDetailsThunk, searchFarmerThunk, selectDetailsError, selectFarmerState, selectIsPollingLong, setFarmerId,
+    updateFarmerDetails
+} from './store/farmerSlice';
+export type { FarmerDetails } from './store/farmerSlice';
+export {
+    addActivityNoteThunk, addCreditInfo, addCreditInfoThunk, clearForm, fetchActivitiesThunk, fetchCallDetailsThunk, fetchCreditInfoThunk, fetchLeadMetadataThunk, fetchLeadProfileThunk, initializeLead, selectActiveLeadId, selectActivities, selectCallDetails, selectCreditInfo, selectIsLeadFinalized, selectIsSubmitting, selectLeadFirstName,
+    selectLeadLastName, selectLeadPhoneNumber, selectLeadSource, selectLeadSourcesOptions, selectLeadStatus, selectLeadStatusesOptions,
+    selectLoanTypesOptions, selectNewLeadState, selectVerificationBlocked, setLeadSource,
+    setLeadStatus, submitNewLeadThunk,
+    updateLeadStatusThunk
+} from './store/newLeadSlice';
+export type { Activity, CallDetail, CreditInfo } from './store/newLeadSlice';
+// Selectors, actions, and thunks from visitSlice
+export {
+    clearVisitState, fetchVisitSchedulesThunk,
+    scheduleVisitThunk, selectVisitState, setVisitSchedule, updateVisitScheduleStatusThunk
+} from './store/visitSlice';
 
-export type { CreditInfo, CallDetail, Activity } from './store/newLeadSlice';
+
+
+
+

@@ -2,10 +2,11 @@
   --dashboard-sidebar-width: 20rem;
   --dashboard-sidebar-width-collapsed: 4.5rem;
   display: grid;
-  min-height: 100vh;
+  height: 100vh;
   grid-template-columns: var(--dashboard-sidebar-width) minmax(0, 1fr);
   background: #F9FAFB;
   color: var(--text-primary);
+  overflow: hidden;
 }
 
 #dashboard-shell.dashboard-shell--collapsed {
@@ -16,6 +17,8 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  height: 100vh;
+  overflow-y: auto;
 }
 
 #dashboard-content {

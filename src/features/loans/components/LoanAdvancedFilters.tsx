@@ -1,62 +1,57 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
-import { createPortal } from 'react-dom';
-import { X, SlidersHorizontal, ChevronDown, Check } from 'lucide-react';
+import { Portal } from '@/components/Portal';
+import { DateRangeFilter } from '@/components/ui/DateRangeFilter';
+import { useModalA11y } from '@/hooks/useModalA11y';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
-import { selectAdvancedFilters, setAdvancedFilters } from '../store/loanDashboardSlice';
-import { DatePickerField } from '@/components/ui/DatePickerField';
+import { Check, ChevronDown, SlidersHorizontal, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  clearAdvancedFilters,
+  selectAdvancedFilters,
+  selectLoanTypeOptions,
+  setAdvancedFilters,
+} from '../store/loanDashboardSlice';
+import {
+  ALL_AMOUNTS_INDEX,
+  loanAmountRange,
+  loanAmountRangeIndex,
+  LOAN_AMOUNT_RANGES,
+  LOAN_FILTER_STATUS_OPTIONS,
+  type FilterStatusOption,
+} from '../constants/loans.constants';
 
 interface LoanAdvancedFiltersProps {
   isOpen: boolean;
   onClose: () => void;
+  /**
+   * Which statuses this portal can filter on. Defaults to the dev-agent
+   * dashboard's list; the bank portals pass their own live pipeline stages,
+   * which is the one thing a fixed list can never get right for every tenant.
+   * This is the *only* thing that differed between the two copies of this
+   * drawer that used to exist.
+   */
+  statusOptions?: readonly FilterStatusOption[];
 }
 
-const STATUS_OPTIONS = [
-  { label: 'Processing', value: 'Processing', dot: 'bg-teal-500' },
-  { label: 'Approved', value: 'Approved', dot: 'bg-teal-500' },
-  { label: 'Rejected', value: 'Rejected', dot: 'bg-red-500' },
-];
-
-const QUICK_DATE_OPTS = [
-  { label: 'Today', days: 0 },
-  { label: 'Yesterday', days: 1 },
-  { label: 'Last 7 Days', days: 7 },
-  { label: 'Last 30 Days', days: 30 },
-];
-
-const RANGE_STEPS = [
-  { label: '0-25,000', value: '0-25000', min: 0, max: 25000, display: 'ETB 0 - 25,000' },
-  { label: '25,001 - 50,000', value: '25001-50000', min: 25001, max: 50000, display: 'ETB 25,001 - 50,000' },
-  { label: '50,001 - 1,00,000', value: '50001-100000', min: 50001, max: 100000, display: 'ETB 50,001 - 1,00,000' },
-  { label: '1,00,000 and above', value: '100000+', min: 100001, max: 10000000, display: 'ETB 100,000+' },
-  { label: 'All Amounts', value: '', min: null, max: null, display: 'All Amounts' },
-] as const;
-
-const getRangeStep = (index: number) => RANGE_STEPS[index] ?? RANGE_STEPS[4];
-
-const LOAN_TYPE_OPTS = [
-  'Input loan (seeds, agrochemicals)',
-  'Agricultural term loan',
-  'Smallholder short-term loan',
-  'Land loan',
-  'Farm equipment loan',
-  'Smallholder farmer direct loan'
-];
-
-export default function LoanAdvancedFilters({ isOpen, onClose }: LoanAdvancedFiltersProps) {
+export default function LoanAdvancedFilters({
+  isOpen,
+  onClose,
+  statusOptions = LOAN_FILTER_STATUS_OPTIONS,
+}: LoanAdvancedFiltersProps) {
   const dispatch = useAppDispatch();
   const currentFilters = useAppSelector(selectAdvancedFilters);
-  const [mounted, setMounted] = useState(false);
+  // `loan_type` is free text on the doctype, so there is no enum to render — the
+  // options are the values actually seen in the data. The six hardcoded strings
+  // that stood here matched no record, so every pick returned an empty table.
+  const loanTypeOptions = useAppSelector(selectLoanTypeOptions);
 
   // Form states
   const [selStatuses, setSelStatuses] = useState<string[]>(currentFilters.status);
-  const [tempIndex, setTempIndex] = useState<number>(4); // 4 = All Amounts
+  const [tempIndex, setTempIndex] = useState<number>(ALL_AMOUNTS_INDEX);
   const [tempLoanTypes, setTempLoanTypes] = useState<string[]>(currentFilters.type || []);
-  const [location, setLocation] = useState(currentFilters.location || '');
+  const [region, setRegion] = useState(currentFilters.region || '');
   const [dateFrom, setDateFrom] = useState(currentFilters.dateFrom || '');
   const [dateTo, setDateTo] = useState(currentFilters.dateTo || '');
   const [quickDate, setQuickDate] = useState('');
-  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
-
   // Dropdown states
   const [isAmountOpen, setIsAmountOpen] = useState(false);
   const amountRef = useRef<HTMLDivElement>(null);
@@ -64,32 +59,21 @@ export default function LoanAdvancedFilters({ isOpen, onClose }: LoanAdvancedFil
   const [isLoanTypeOpen, setIsLoanTypeOpen] = useState(false);
   const loanTypeRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  // Sync state when opened
+  // Sync state when opened — this panel stays mounted while closed (isOpen
+  // just gates the portal render below), so its local editable copy of the
+  // filters must be resynced here on reopen rather than via unmount/remount.
   useEffect(() => {
     if (isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelStatuses(currentFilters.status);
-      setLocation(currentFilters.location);
+      setRegion(currentFilters.region);
       setDateFrom(currentFilters.dateFrom);
       setDateTo(currentFilters.dateTo);
       setTempLoanTypes(currentFilters.type || []);
-
-      const min = currentFilters.minLoan;
-      const max = currentFilters.maxLoan;
-      let amtIdx = 4;
-      if (min !== null && max !== null) {
-        if (min === 0 && max === 25000) amtIdx = 0;
-        else if (min === 25001 && max === 50000) amtIdx = 1;
-        else if (min === 50001 && max === 100000) amtIdx = 2;
-        else if (min === 100001 && max === 10000000) amtIdx = 3;
-      }
-      setTempIndex(amtIdx);
+      setTempIndex(loanAmountRangeIndex(currentFilters.minLoan, currentFilters.maxLoan));
 
       // Removed automatic date setting to 'Today'
-      setQuickDate(currentFilters.dateFrom || currentFilters.dateTo ? '' : quickDate);
+      setQuickDate((q) => (currentFilters.dateFrom || currentFilters.dateTo ? '' : q));
     }
   }, [isOpen, currentFilters]);
 
@@ -104,21 +88,25 @@ export default function LoanAdvancedFilters({ isOpen, onClose }: LoanAdvancedFil
   }, [isAmountOpen, isLoanTypeOpen]);
 
   const selectedAmountSummary = useMemo(() => {
-    if (tempIndex === 4) return '';
-    return getRangeStep(tempIndex).display;
+    if (tempIndex === ALL_AMOUNTS_INDEX) return '';
+    return loanAmountRange(tempIndex).display;
   }, [tempIndex]);
 
-  if (!mounted || !isOpen) return null;
+  const dialogRef = useModalA11y<HTMLElement>(isOpen, onClose);
+
+  if (!isOpen) return null;
 
   const toggleStatus = (s: string) => setSelStatuses(p => p.includes(s) ? p.filter(x => x !== s) : [...p, s]);
 
   const handleApply = () => {
+    // Filter values only — the sort lives in the same slice object but this drawer
+    // has no sort control, and passing the whole object used to reset it on Apply.
     dispatch(setAdvancedFilters({
       status: selStatuses,
-      minLoan: getRangeStep(tempIndex).min,
-      maxLoan: getRangeStep(tempIndex).max,
+      minLoan: loanAmountRange(tempIndex).min,
+      maxLoan: loanAmountRange(tempIndex).max,
       type: tempLoanTypes,
-      location,
+      region,
       dateFrom,
       dateTo,
     }));
@@ -127,19 +115,25 @@ export default function LoanAdvancedFilters({ isOpen, onClose }: LoanAdvancedFil
 
   const handleReset = () => {
     setSelStatuses([]);
-    setTempIndex(4);
+    setTempIndex(ALL_AMOUNTS_INDEX);
     setTempLoanTypes([]);
-    setLocation('');
+    setRegion('');
     setDateFrom('');
     setDateTo('');
     setQuickDate('');
+    // Clear the applied filters in the store too, so the table refreshes
+    // immediately rather than waiting for a separate Apply.
+    dispatch(clearAdvancedFilters());
   };
 
+  // ALL_AMOUNTS_INDEX is "All Amounts" — i.e. no amount filter. Comparing against
+  // the last real bucket instead counted "All Amounts" as an active filter and left
+  // the last real range uncounted.
   const activeCount =
     selStatuses.length +
-    (tempIndex !== 3 ? 1 : 0) +
+    (tempIndex !== ALL_AMOUNTS_INDEX ? 1 : 0) +
     (tempLoanTypes.length > 0 ? 1 : 0) +
-    (location ? 1 : 0) +
+    (region ? 1 : 0) +
     (dateFrom || dateTo ? 1 : 0);
 
   const sidebarContent = (
@@ -149,7 +143,13 @@ export default function LoanAdvancedFilters({ isOpen, onClose }: LoanAdvancedFil
         onClick={onClose}
       />
 
-      <aside className="relative w-full max-w-[540px] bg-white shadow-2xl flex flex-col h-full animate-in slide-in-from-right duration-300">
+      <aside
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Advanced Filters"
+        tabIndex={-1}
+        className="relative w-full max-w-[540px] bg-white shadow-2xl flex flex-col h-full animate-in slide-in-from-right duration-300">
 
         {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4 ">
@@ -173,19 +173,28 @@ export default function LoanAdvancedFilters({ isOpen, onClose }: LoanAdvancedFil
           <section>
             <p className="mb-3 text-base font-semibold text-[#232F34]">Status</p>
             <div className="grid grid-cols-2 gap-2">
-              {STATUS_OPTIONS.map(opt => {
+              {statusOptions.map(opt => {
                 const sel = selStatuses.includes(opt.value);
                 return (
                   <div
                     key={opt.value}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={sel}
                     onClick={() => toggleStatus(opt.value)}
-                    className={`flex cursor-pointer items-center justify-between rounded-xl border px-3 py-3 transition ${sel ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white hover:border-gray-300'}`}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        toggleStatus(opt.value);
+                      }
+                    }}
+                    className={`flex cursor-pointer items-center justify-between rounded-xl border px-3 py-3 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#16A34A] focus-visible:ring-offset-2 ${sel ? 'border-[#16A34A] bg-green-50' : 'border-gray-200 bg-white hover:border-gray-300'}`}
                   >
                     <div className="flex items-center gap-3">
-                      <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition ${sel ? 'border-green-600 bg-green-600' : 'border-gray-300 bg-white'}`}>
+                      <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition ${sel ? 'border-[#16A34A] bg-[#16A34A]' : 'border-gray-300 bg-white'}`}>
                         {sel && <Check size={12} strokeWidth={3} className="text-white" />}
                       </div>
-                      <span className={`text-base font-medium ${sel ? 'text-green-700' : 'text-[#232F34]'}`}>{opt.label}</span>
+                      <span className={`text-base font-medium ${sel ? 'text-[#10883c]' : 'text-[#232F34]'}`}>{opt.label}</span>
                     </div>
                     <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${opt.dot}`} />
                   </div>
@@ -201,12 +210,12 @@ export default function LoanAdvancedFilters({ isOpen, onClose }: LoanAdvancedFil
               <button
                 type="button"
                 onClick={() => setIsAmountOpen(prev => !prev)}
-                className={`flex w-full items-center justify-between rounded-lg border px-4 py-3 text-sm shadow-sm transition-all focus:outline-none ${isAmountOpen ? 'border-green-600 bg-white ring-2 ring-green-600/15' : 'border-gray-200 bg-white hover:border-green-600/50'}`}
+                className={`flex w-full items-center justify-between rounded-lg border px-4 py-3 text-sm shadow-sm transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[#16A34A] focus-visible:ring-offset-1 ${isAmountOpen ? 'border-[#16A34A] bg-white ring-2 ring-[#16A34A]/15' : 'border-gray-200 bg-white hover:border-[#16A34A]/50'}`}
               >
                 <span className={selectedAmountSummary ? 'text-[#232F34] font-medium' : 'text-[#8E9AA0]'}>
                   {selectedAmountSummary || 'Select Loan Amount'}
                 </span>
-                <ChevronDown size={14} className={`text-gray-400 transition-transform ${isAmountOpen ? 'rotate-180 text-green-600' : ''}`} />
+                <ChevronDown size={14} className={`text-gray-400 transition-transform ${isAmountOpen ? 'rotate-180 text-[#16A34A]' : ''}`} />
               </button>
 
               {isAmountOpen && (
@@ -220,20 +229,20 @@ export default function LoanAdvancedFilters({ isOpen, onClose }: LoanAdvancedFil
                       <div className="h-3 w-full bg-[#D1D5DB] rounded-full relative">
                         <div
                           className="absolute left-0 top-0 h-full bg-[#16A34A] rounded-full"
-                          style={{ width: `${(tempIndex / 4) * 100}%` }}
+                          style={{ width: `${(tempIndex / ALL_AMOUNTS_INDEX) * 100}%` }}
                         />
                         <input
                           type="range"
                           min="0"
-                          max="4"
+                          max={ALL_AMOUNTS_INDEX}
                           step="1"
                           value={tempIndex}
                           onChange={e => setTempIndex(Number(e.target.value))}
                           className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer"
                         />
                         <div
-                          className="absolute w-7 h-7 bg-white border-[4px] border-[#4B8261] rounded-full -top-2 -ml-3.5 pointer-events-none transition-all shadow-sm"
-                          style={{ left: `${(tempIndex / 4) * 100}%` }}
+                          className="absolute w-7 h-7 bg-white border-[4px] border-[#16A34A] rounded-full -top-2 -ml-3.5 pointer-events-none transition-all shadow-sm"
+                          style={{ left: `${(tempIndex / ALL_AMOUNTS_INDEX) * 100}%` }}
                         />
                       </div>
                     </div>
@@ -246,14 +255,15 @@ export default function LoanAdvancedFilters({ isOpen, onClose }: LoanAdvancedFil
                       </div>
 
                       <div className="absolute left-1/2 -translate-x-1/2 bg-[#D1FAE5] border border-[#A7F3D0] px-3 py-1.5 rounded-lg flex items-center justify-center min-w-[120px]">
-                        <span className="text-[13px] font-bold text-[#059669]">
-                          {getRangeStep(tempIndex).display}
+                        <span className="text-[13px] font-bold text-[#16A34A]">
+                          {loanAmountRange(tempIndex).display}
                         </span>
                       </div>
 
                       <div className="flex flex-col items-end leading-tight">
                         <span className="text-[10px] font-bold text-gray-500 tracking-wide">ETB</span>
-                        <span className="text-sm font-bold text-gray-700">1000000</span>
+                        {/* The top bucket has no ceiling, so the scale can't claim one. */}
+                        <span className="text-sm font-bold text-gray-700">100,000+</span>
                       </div>
                     </div>
                   </div>
@@ -261,13 +271,22 @@ export default function LoanAdvancedFilters({ isOpen, onClose }: LoanAdvancedFil
                   <hr className="border-t border-[#F3F3F3] -mx-4" />
 
                   <div className="flex flex-col -mx-4 -mb-4">
-                    {RANGE_STEPS.slice(0, 4).map((opt, idx) => {
+                    {LOAN_AMOUNT_RANGES.slice(0, ALL_AMOUNTS_INDEX).map((opt, idx) => {
                       const isSel = tempIndex === idx;
                       return (
                         <div
-                          key={opt.value}
-                          onClick={() => setTempIndex(isSel ? 4 : idx)}
-                          className="flex items-center gap-4 py-4 px-6 border-b border-[#F3F3F3] last:border-0 hover:bg-slate-50 cursor-pointer select-none"
+                          key={opt.label}
+                          role="button"
+                          tabIndex={0}
+                          aria-pressed={isSel}
+                          onClick={() => setTempIndex(isSel ? ALL_AMOUNTS_INDEX : idx)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setTempIndex(isSel ? ALL_AMOUNTS_INDEX : idx);
+                            }
+                          }}
+                          className="flex items-center gap-4 py-4 px-6 border-b border-[#F3F3F3] last:border-0 hover:bg-slate-50 cursor-pointer select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[#16A34A] focus-visible:ring-inset"
                         >
                           <div className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md border-2 transition-all ${isSel ? 'border-[#16A34A] bg-[#16A34A]' : 'border-gray-400 bg-white'}`}>
                             {isSel && <Check size={14} strokeWidth={4} className="text-white" />}
@@ -289,24 +308,37 @@ export default function LoanAdvancedFilters({ isOpen, onClose }: LoanAdvancedFil
               <button
                 type="button"
                 onClick={() => setIsLoanTypeOpen(prev => !prev)}
-                className={`flex w-full items-center justify-between rounded-lg border px-4 py-3 text-sm shadow-sm transition-all focus:outline-none ${isLoanTypeOpen ? 'border-green-600 bg-white ring-2 ring-green-600/15' : 'border-[#EDEFF1] bg-white hover:border-green-600/50'}`}
+                className={`flex w-full items-center justify-between rounded-lg border px-4 py-3 text-sm shadow-sm transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[#16A34A] focus-visible:ring-offset-1 ${isLoanTypeOpen ? 'border-[#16A34A] bg-white ring-2 ring-[#16A34A]/15' : 'border-[#EDEFF1] bg-white hover:border-[#16A34A]/50'}`}
               >
                 <span className={tempLoanTypes.length > 0 ? 'text-[#232F34] font-medium' : 'text-[#8E9AA0]'}>
                   {tempLoanTypes.length > 0 ? `${tempLoanTypes.length} Selected` : 'Select Loan Type'}
                 </span>
-                <ChevronDown size={14} className={`text-gray-400 transition-transform ${isLoanTypeOpen ? 'rotate-180 text-green-600' : ''}`} />
+                <ChevronDown size={14} className={`text-gray-400 transition-transform ${isLoanTypeOpen ? 'rotate-180 text-[#16A34A]' : ''}`} />
               </button>
 
               {isLoanTypeOpen && (
                 <div className="absolute left-0 right-0 z-30 mt-1 rounded-b-lg border border-gray-200 bg-white shadow-xl flex flex-col">
                   <div className="flex flex-col">
-                    {LOAN_TYPE_OPTS.map((opt, idx) => {
+                    {loanTypeOptions.length === 0 ? (
+                      <p className="px-6 py-4 text-[13px] text-[#8E9AA0]">
+                        No loan types seen yet — they appear as applications load.
+                      </p>
+                    ) : loanTypeOptions.map((opt, idx) => {
                       const isSel = tempLoanTypes.includes(opt);
                       return (
                         <div
                           key={opt}
+                          role="button"
+                          tabIndex={0}
+                          aria-pressed={isSel}
                           onClick={() => setTempLoanTypes(prev => isSel ? prev.filter(x => x !== opt) : [...prev, opt])}
-                          className={`flex items-center gap-4 py-4 px-6 border-b border-[#F3F3F3] last:border-0 hover:bg-slate-50 cursor-pointer select-none ${idx === LOAN_TYPE_OPTS.length - 1 ? 'rounded-b-lg' : ''}`}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setTempLoanTypes(prev => isSel ? prev.filter(x => x !== opt) : [...prev, opt]);
+                            }
+                          }}
+                          className={`flex items-center gap-4 py-4 px-6 border-b border-[#F3F3F3] last:border-0 hover:bg-slate-50 cursor-pointer select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[#16A34A] focus-visible:ring-inset ${idx === loanTypeOptions.length - 1 ? 'rounded-b-lg' : ''}`}
                         >
                           <div className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md border-2 transition-all ${isSel ? 'border-[#16A34A] bg-[#16A34A]' : 'border-gray-400 bg-white'}`}>
                             {isSel && <Check size={14} strokeWidth={4} className="text-white" />}
@@ -321,65 +353,33 @@ export default function LoanAdvancedFilters({ isOpen, onClose }: LoanAdvancedFil
             </div>
           </section>
 
-          {/* Location */}
+          {/* Region */}
           <section>
-            <p className="mb-3 text-base font-semibold text-[#232F34]">Location</p>
+            <p className="mb-3 text-base font-semibold text-[#232F34]">Region</p>
             <div className="relative">
               <input
                 type="text"
-                value={location}
-                onChange={e => setLocation(e.target.value)}
-                placeholder="Enter Region, Woreda or Kebele"
-                className="w-full rounded-md border border-[#EDEFF1] bg-white py-3 px-4 text-sm text-[#232F34] placeholder:text-[#8E9AA0] focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/20 shadow-sm"
+                value={region}
+                onChange={e => setRegion(e.target.value)}
+                placeholder="Enter Region"
+                className="w-full rounded-md border border-[#EDEFF1] bg-white py-3 px-4 text-[16px] md:text-sm text-[#232F34] placeholder:text-[#8E9AA0] focus:border-[#16A34A] focus:outline-none focus:ring-2 focus:ring-[#16A34A]/20 shadow-sm"
               />
+              {/* One field, and it says which one. It used to invite "Region, Woreda
+                  or Kebele" and send the lot as a `location` param that matches no
+                  column on A2C Loan Application — a 500 rather than a filter. */}
+              <p className="mt-2 text-[13px] text-[#8E9AA0]">Matched from the start of the region name.</p>
             </div>
           </section>
 
           {/* Date Range */}
-          <section className={isDatePickerOpen ? "pb-[280px]" : ""}>
-            <p className="mb-3 text-base font-semibold text-[#232F34]">Date Range</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {[
-                { label: 'From', val: dateFrom, set: (v: string) => { setDateFrom(v); setQuickDate(''); } },
-                { label: 'To', val: dateTo, set: (v: string) => { setDateTo(v); setQuickDate(''); } },
-              ].map(({ label, val, set }) => (
-                <div key={label} className="relative">
-                  <p className="mb-1 text-sm text-gray-500">{label}</p>
-                  <DatePickerField
-                    value={val}
-                    onChange={(v) => set(v)}
-                    usePortal={false}
-                    align={label === 'To' ? 'right' : 'left'}
-                    onOpenChange={(isOpen) => setIsDatePickerOpen(isOpen)}
-                  />
-                </div>
-              ))}
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2 font-semibold">
-              {QUICK_DATE_OPTS.map(o => (
-                <button
-                  key={o.label}
-                  type="button"
-                  onClick={() => {
-                    setQuickDate(o.label);
-                    const to = new Date();
-                    const from = new Date();
-                    if (o.days === 1) {
-                      from.setDate(from.getDate() - 1);
-                      to.setDate(to.getDate() - 1);
-                    } else {
-                      from.setDate(from.getDate() - o.days);
-                    }
-                    setDateFrom(from.toISOString().split('T')[0] ?? '');
-                    setDateTo(to.toISOString().split('T')[0] ?? '');
-                  }}
-                  className={`rounded-md border px-3 py-1.5 text-sm font-medium transition ${quickDate === o.label ? 'border-green-600 bg-green-50 text-green-700 font-semibold' : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300 hover:text-gray-700  font-semibold'}`}
-                >
-                  {o.label}
-                </button>
-              ))}
-            </div>
-          </section>
+          <DateRangeFilter
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            quickDate={quickDate}
+            onDateFromChange={(v) => { setDateFrom(v); setQuickDate(''); }}
+            onDateToChange={(v) => { setDateTo(v); setQuickDate(''); }}
+            onQuickDateChange={(label, from, to) => { setQuickDate(label); setDateFrom(from); setDateTo(to); }}
+          />
 
         </div>
 
@@ -390,14 +390,14 @@ export default function LoanAdvancedFilters({ isOpen, onClose }: LoanAdvancedFil
             onClick={handleReset}
             className="flex-1 rounded-xl border border-gray-200 bg-white py-4 mb-3 text-base font-semibold text-[#232F34] transition hover:bg-slate-50"
           >
-            Reset Filters
+            <span className='font-semibold'>Reset Filters</span>
           </button>
           <button
             type="button"
             onClick={handleApply}
             className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-[#16A34A] mb-3 py-3 text-sm font-semibold text-white transition hover:bg-[#10883c]"
           >
-            Apply Filters
+            <span className='font-semibold'>Apply Filters</span>
             {activeCount > 0 && (
               <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/25 text-xs">
                 {activeCount}
@@ -410,5 +410,5 @@ export default function LoanAdvancedFilters({ isOpen, onClose }: LoanAdvancedFil
     </div>
   );
 
-  return createPortal(sidebarContent, document.body);
+  return <Portal>{sidebarContent}</Portal>;
 }

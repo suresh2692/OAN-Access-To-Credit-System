@@ -1,10 +1,11 @@
+import { Portal } from '@/components/Portal';
 import { logger } from '@/lib/logger';
-import { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
-import { X, Search, Loader2 } from 'lucide-react';
+import { useModalA11y } from '@/hooks/useModalA11y';
+import { Loader2, Search, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { newLeadService } from '../../api/newLead.service';
 
-interface User {
+export interface AssignableUser {
   id: string;
   name: string;
   email: string;
@@ -15,7 +16,7 @@ interface AssignOwnerModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentOwnerName: string;
-  onAssign: (user: User) => void;
+  onAssign: (user: AssignableUser) => void;
 }
 
 export default function AssignOwnerModal({
@@ -25,30 +26,18 @@ export default function AssignOwnerModal({
   onAssign,
 }: AssignOwnerModalProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  const [users, setUsers] = useState<User[]>([]);
+  const [selectedUser, setSelectedUser] = useState<AssignableUser | null>(null);
+  const [users, setUsers] = useState<AssignableUser[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const dialogRef = useModalA11y<HTMLDivElement>(isOpen, onClose);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [isOpen]);
+  // Body scroll lock is handled by useModalA11y (ref-counted so a stacked
+  // modal underneath this one isn't unlocked prematurely).
 
   // Fetching, loading state, and error handling are managed locally here (outside of Redux)
   // because the assignable users list is transient UI state specific to this modal.
   useEffect(() => {
-    if (!isOpen || !mounted) return;
+    if (!isOpen) return;
 
     let active = true;
 
@@ -80,9 +69,9 @@ export default function AssignOwnerModal({
       active = false;
       clearTimeout(delay);
     };
-  }, [searchQuery, isOpen, mounted]);
+  }, [searchQuery, isOpen]);
 
-  if (!isOpen || !mounted) return null;
+  if (!isOpen) return null;
 
   const handleAssign = () => {
     if (selectedUser) {
@@ -90,8 +79,8 @@ export default function AssignOwnerModal({
     }
   };
 
-  return createPortal(
-    <>
+  return (
+    <Portal>
       {/* Backdrop */}
       <div
         className="fixed inset-0 z-[9999] bg-black/40 backdrop-blur-[2px] flex items-center justify-center p-4"
@@ -99,13 +88,18 @@ export default function AssignOwnerModal({
       >
         {/* Modal Container */}
         <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="assign-owner-modal-title"
+          tabIndex={-1}
           className="flex flex-col items-start p-0 w-[95%] sm:w-[448px] h-auto bg-white rounded-[10px] shadow-xl overflow-hidden"
           onClick={(e) => e.stopPropagation()}
         >
 
           {/* Header */}
           <div className="box-border flex flex-row justify-between items-center p-6 w-full h-[77px] border-b border-[#E5E7EB]">
-            <h2 className="w-full font-inter font-semibold text-[18px] leading-[28px] tracking-[-0.439453px] text-[#0A0A0A]">
+            <h2 id="assign-owner-modal-title" className="w-full font-inter font-semibold text-[18px] leading-[28px] tracking-[-0.439453px] text-[#0A0A0A]">
               Assign Owner
             </h2>
             <button
@@ -174,7 +168,7 @@ export default function AssignOwnerModal({
                         key={user.id}
                         onClick={() => setSelectedUser(user)}
                         className={`box-border flex flex-row items-center p-[12px] gap-[12px] w-full h-[54px] rounded-[10px] transition-colors shrink-0 ${isSelected
-                          ? 'bg-[#F4F9FF] border border-[#2B7FFF]'
+                          ? 'bg-[#16A34A]/5 border border-[#16A34A]'
                           : 'bg-white border border-[#E5E7EB] hover:bg-gray-50'
                           }`}
                       >
@@ -193,7 +187,7 @@ export default function AssignOwnerModal({
           </div>
 
           {/* Footer */}
-          <div className="box-border flex flex-row justify-end items-center p-[24px] gap-[12px] w-[448px] h-[87px] border-t border-[#E5E7EB] bg-white absolute bottom-0">
+          <div className="box-border flex flex-row justify-end items-center p-[24px] gap-[12px] w-full h-[87px] border-t border-[#E5E7EB] bg-white">
             <div className="flex flex-row items-center p-0 gap-[12px] w-[224.86px] h-[40px] ml-auto">
               <button
                 onClick={onClose}
@@ -219,7 +213,6 @@ export default function AssignOwnerModal({
 
         </div>
       </div>
-    </>,
-    document.body
+    </Portal>
   );
 }
