@@ -5,7 +5,7 @@
 //  Per branch:
 //    develop -> build + push to ECR (oan-a2c-frontend) + ci/deploy-dev.sh
 //               (existing dev-VM docker-compose deploy — UNCHANGED)
-//    staging -> build + push to ECR (oan/access-to-credit-system) + ci/update-kustomize.sh
+//    staging -> build + push to ECR (oan/access-to-credit-system) + ci/update-kustomize-ati.sh
 //               (GitOps: bump oan-kustomize `staging` overlay; ArgoCD on node 41 syncs)
 //
 //  develop stays on the LEGACY `oan-a2c-frontend` repo because ci/deploy-dev.sh and
@@ -42,8 +42,8 @@ pipeline {
       steps {
         script {
           // staging -> new namespaced repo + on-prem backend; else -> legacy (unchanged).
-          env.ECR_REPO      = (env.BRANCH_NAME == 'staging') ? 'oan/access-to-credit-system' : 'oan-a2c-frontend'
-          env.API_BASE_URL  = (env.BRANCH_NAME == 'staging') ? env.STAGING_API_BASE_URL : env.DEV_API_BASE_URL
+          env.ECR_REPO      = (env.BRANCH_NAME == 'staging_ati') ? 'oan/access-to-credit-system' : 'oan-a2c-frontend'
+          env.API_BASE_URL  = (env.BRANCH_NAME == 'staging_ati') ? env.STAGING_API_BASE_URL : env.DEV_API_BASE_URL
           env.IMMUTABLE_TAG = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
           env.MOVING_TAG    = "${env.BRANCH_NAME}-latest"
           echo "branch=${env.BRANCH_NAME}  repo=${env.ECR_REPO}  tag=${env.IMMUTABLE_TAG}  api=${env.API_BASE_URL}"
@@ -52,7 +52,7 @@ pipeline {
     }
 
     stage('Build image') {
-      when { anyOf { branch 'develop'; branch 'staging' } }
+      when { anyOf { branch 'develop'; branch 'staging_ati' } }
       steps {
         withCredentials([string(credentialsId: 'AWS_ACCOUNT_ID', variable: 'AWS_ACCOUNT_ID')]) {
           sh '''#!/usr/bin/env bash
@@ -76,7 +76,7 @@ pipeline {
     }
 
     stage('Push to ECR') {
-      when { anyOf { branch 'develop'; branch 'staging' } }
+      when { anyOf { branch 'develop'; branch 'staging_ati' } }
       steps {
         withCredentials([string(credentialsId: 'AWS_ACCOUNT_ID', variable: 'AWS_ACCOUNT_ID')]) {
           sh '''#!/usr/bin/env bash
@@ -120,7 +120,7 @@ pipeline {
     // staging -> GitOps: bump apps/access-to-credit-system/overlays/staging in oan-kustomize.
     // Auth is the `oan-deployer` GitHub App (contents:write on oan-kustomize only).
     stage('staging → GitOps (ArgoCD@41)') {
-      when { branch 'staging' }
+      when { branch 'staging_ati' }
       steps {
         withCredentials([
           string(credentialsId: 'AWS_ACCOUNT_ID', variable: 'AWS_ACCOUNT_ID'),
@@ -128,9 +128,9 @@ pipeline {
         ]) {
           sh '''#!/usr/bin/env bash
             set -euo pipefail
-            chmod +x ci/update-kustomize.sh
+            chmod +x ci/update-kustomize-ati.sh
             # args: <overlay> <kustomize image match-name> <new image ref>
-            ci/update-kustomize.sh staging access-to-credit-system \
+            ci/update-kustomize-ati.sh staging access-to-credit-system \
               "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IMMUTABLE_TAG}"
           '''
         }
