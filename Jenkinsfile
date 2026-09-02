@@ -3,23 +3,29 @@
 //  pipeline for the `oan-package` GitHub Organization folder (multibranch).
 //
 //  Per branch:
-//    develop -> build + push to ECR (oan-a2c-frontend) + ci/deploy-dev.sh
-//               (existing dev-VM docker-compose deploy — UNCHANGED)
-//    staging -> build + push to ECR (oan/access-to-credit-system) + ci/update-kustomize-ati.sh
-//               (GitOps: bump oan-kustomize `staging` overlay; ArgoCD on node 41 syncs)
+//    develop     -> build + push to ECR (oan-a2c-frontend) + ci/deploy-dev.sh
+//                   (existing dev-VM docker-compose deploy — UNCHANGED)
+//    staging_aws -> build + push to ECR (oan/access-to-credit-system) + SSH docker-compose
+//                   deploy to a SEPARATE frontend stack on the AWS backend box (BACKEND_IP,
+//                   ${STAGING_AWS_APP_DIR}, host port 3002). Mirrors Jenkinsfile.main, which
+//                   it supersedes; coexists with main's /opt/oan_a2c_fe_main (port 3001).
+//    staging_ati -> build + push to ECR (oan/access-to-credit-system) + ci/update-kustomize-ati.sh
+//                   (GitOps: bump oan-kustomize `staging` overlay; ArgoCD on node 41 syncs)
 //
 //  develop stays on the LEGACY `oan-a2c-frontend` repo because ci/deploy-dev.sh and
 //  the dev VM's .env reference it. `main` is handled separately by Jenkinsfile.main
-//  (staging VM) during validation.
+//  (staging VM) during validation; staging_aws supersedes it.
 //
 //  API_BASE_URL is baked into the Next.js image at build time (per branch):
-//    develop -> the dev backend;  staging -> the on-prem backend on node 41.
+//    develop -> the dev backend;  staging_aws -> the existing public backend
+//    (a2c-backend.oanstaging.com);  staging_ati -> the on-prem backend on node 41.
 //
 //  Tags:  <branch>-<build>   immutable, pinned by oan-kustomize
 //         <branch>-latest    moving alias
 //
 //  Agent needs: docker(+buildx), aws cli v2, git, kustomize.
-//  Credentials: AWS_ACCOUNT_ID, frontend-uat-ssh-key, FRONTEND_UAT_IP, oan-deployer.
+//  Credentials: AWS_ACCOUNT_ID; frontend-uat-ssh-key + FRONTEND_UAT_IP (develop);
+//               backend-ssh-key (staging_aws); oan-deployer (staging_ati GitOps).
 // =============================================================================
 pipeline {
   agent any
@@ -32,18 +38,25 @@ pipeline {
   }
 
   environment {
-    AWS_REGION           = 'ap-south-1'
-    DEV_API_BASE_URL     = 'https://a2c-backend-development.oanstaging.com'
-    STAGING_API_BASE_URL = 'https://a2c.ati-staging.internal'   // on-prem backend on node 41
+    AWS_REGION               = 'ap-south-1'
+    BACKEND_IP               = '10.0.2.100'                            // AWS backend box (staging_aws)
+    DEV_API_BASE_URL         = 'https://a2c-backend-development.oanstaging.com'
+    STAGING_API_BASE_URL     = 'https://a2c.ati-staging.internal'      // on-prem backend on node 41
+    AWS_STAGING_API_BASE_URL = 'https://a2c-backend.oanstaging.com'    // staging_aws: reuse existing public backend
+    STAGING_AWS_APP_DIR      = '/opt/oan_a2c_fe_staging'               // separate from main's /opt/oan_a2c_fe_main
   }
 
   stages {
     stage('Resolve') {
       steps {
         script {
-          // staging -> new namespaced repo + on-prem backend; else -> legacy (unchanged).
-          env.ECR_REPO      = (env.BRANCH_NAME == 'staging_ati') ? 'oan/access-to-credit-system' : 'oan-a2c-frontend'
-          env.API_BASE_URL  = (env.BRANCH_NAME == 'staging_ati') ? env.STAGING_API_BASE_URL : env.DEV_API_BASE_URL
+          // develop -> legacy repo + dev backend (unchanged).
+          // staging_aws -> namespaced repo + existing public backend.
+          // staging_ati -> namespaced repo + on-prem backend (node 41).
+          env.ECR_REPO      = (env.BRANCH_NAME == 'develop') ? 'oan-a2c-frontend' : 'oan/access-to-credit-system'
+          env.API_BASE_URL  = (env.BRANCH_NAME == 'staging_ati') ? env.STAGING_API_BASE_URL
+                            : (env.BRANCH_NAME == 'staging_aws') ? env.AWS_STAGING_API_BASE_URL
+                            : env.DEV_API_BASE_URL
           env.IMMUTABLE_TAG = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
           env.MOVING_TAG    = "${env.BRANCH_NAME}-latest"
           echo "branch=${env.BRANCH_NAME}  repo=${env.ECR_REPO}  tag=${env.IMMUTABLE_TAG}  api=${env.API_BASE_URL}"
@@ -52,7 +65,7 @@ pipeline {
     }
 
     stage('Build image') {
-      when { anyOf { branch 'develop'; branch 'staging_ati' } }
+      when { anyOf { branch 'develop'; branch 'staging_aws'; branch 'staging_ati' } }
       steps {
         withCredentials([string(credentialsId: 'AWS_ACCOUNT_ID', variable: 'AWS_ACCOUNT_ID')]) {
           sh '''#!/usr/bin/env bash
@@ -76,7 +89,7 @@ pipeline {
     }
 
     stage('Push to ECR') {
-      when { anyOf { branch 'develop'; branch 'staging_ati' } }
+      when { anyOf { branch 'develop'; branch 'staging_aws'; branch 'staging_ati' } }
       steps {
         withCredentials([string(credentialsId: 'AWS_ACCOUNT_ID', variable: 'AWS_ACCOUNT_ID')]) {
           sh '''#!/usr/bin/env bash
@@ -117,7 +130,59 @@ pipeline {
       }
     }
 
-    // staging -> GitOps: bump apps/access-to-credit-system/overlays/staging in oan-kustomize.
+    // staging_aws -> a SEPARATE frontend stack on the SAME AWS backend box (BACKEND_IP),
+    // mirroring Jenkinsfile.main's Deploy-to-Staging-VM but into ${STAGING_AWS_APP_DIR} on
+    // host port 3002 (main uses /opt/oan_a2c_fe_main:3001). API_BASE_URL is baked at build
+    // time; we reuse the existing public backend (a2c-backend.oanstaging.com) per the env.
+    // PREREQ: ${STAGING_AWS_APP_DIR} must exist on BACKEND_IP, owned by the ssh user, so scp
+    // can land the compose file (mkdir in /opt needs root — provisioned once, out of band).
+    stage('staging_aws → AWS frontend (separate stack)') {
+      when { branch 'staging_aws' }
+      steps {
+        withCredentials([
+          string(credentialsId: 'AWS_ACCOUNT_ID', variable: 'AWS_ACCOUNT_ID'),
+          sshUserPrivateKey(credentialsId: 'backend-ssh-key',
+                            keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')
+        ]) {
+          sh '''#!/usr/bin/env bash
+            set -euo pipefail
+            REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+            IMAGE_URI="${REGISTRY}/${ECR_REPO}:${IMMUTABLE_TAG}"
+
+            scp -i "${SSH_KEY}" -o StrictHostKeyChecking=no \
+              docker-compose.yaml "${SSH_USER}@${BACKEND_IP}:${STAGING_AWS_APP_DIR}/docker-compose.yaml"
+
+            ssh -i "${SSH_KEY}" -o StrictHostKeyChecking=no "${SSH_USER}@${BACKEND_IP}" << SSHEOF
+              set -e
+              cd ${STAGING_AWS_APP_DIR}
+
+              # host port 3002 + distinct container name so this coexists with main's 3001 stack
+              sed -i 's/3000:3000/3002:3000/' docker-compose.yaml
+              sed -i 's/oan_a2c_frontend/oan_a2c_frontend_staging/' docker-compose.yaml
+
+              cat > .env <<ENVEOF
+ECR_IMAGE=${IMAGE_URI}
+API_BASE_URL=${API_BASE_URL}
+ENVEOF
+
+              aws ecr get-login-password --region ${AWS_REGION} \
+                | docker login --username AWS --password-stdin ${REGISTRY}
+
+              docker compose pull
+              docker compose down || true
+              docker compose up -d
+              sleep 15
+              curl -sf http://localhost:3002 >/dev/null \
+                && echo "Health check passed (port 3002)" || echo "Warning: health check failed"
+              echo "=== staging_aws frontend deployed on port 3002 ==="
+              docker compose ps
+SSHEOF
+          '''
+        }
+      }
+    }
+
+    // staging_ati -> GitOps: bump apps/access-to-credit-system/overlays/staging in oan-kustomize.
     // Auth is the `oan-deployer` GitHub App (contents:write on oan-kustomize only).
     stage('staging → GitOps (ArgoCD@41)') {
       when { branch 'staging_ati' }
