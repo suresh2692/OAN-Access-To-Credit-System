@@ -2,9 +2,10 @@
 //  Jenkinsfile — OAN-Access-To-Credit-System (A2C frontend, Next.js). Single
 //  pipeline for the `oan-package` GitHub Organization folder (multibranch).
 //
-//  Per branch:
-//    develop     -> build + push to ECR (oan-a2c-frontend) + ci/deploy-dev.sh
-//                   (existing dev-VM docker-compose deploy — UNCHANGED)
+//  Per branch (all publish to the namespaced ECR repo oan/access-to-credit-system):
+//    develop     -> build + push + ci/deploy-dev.sh (dev-VM docker-compose deploy).
+//                   Migrated off legacy oan-a2c-frontend — the agent's ECR identity can't
+//                   push it; deploy-dev.sh rewrites the dev VM .env from ECR_REPO.
 //    staging_aws -> build + push to ECR (oan/access-to-credit-system) + SSH docker-compose
 //                   deploy to a SEPARATE frontend stack on the AWS backend box (BACKEND_IP,
 //                   ${STAGING_AWS_APP_DIR}, host port 3002). Mirrors Jenkinsfile.main, which
@@ -12,9 +13,8 @@
 //    staging_ati -> build + push to ECR (oan/access-to-credit-system) + ci/update-kustomize-ati.sh
 //                   (GitOps: bump oan-kustomize `staging` overlay; ArgoCD on node 41 syncs)
 //
-//  develop stays on the LEGACY `oan-a2c-frontend` repo because ci/deploy-dev.sh and
-//  the dev VM's .env reference it. `main` is handled separately by Jenkinsfile.main
-//  (staging VM) during validation; staging_aws supersedes it.
+//  `main` is handled separately by Jenkinsfile.main (staging VM) during validation;
+//  staging_aws supersedes it.
 //
 //  API_BASE_URL is baked into the Next.js image at build time (per branch):
 //    develop -> the dev backend;  staging_aws -> the existing public backend
@@ -50,10 +50,13 @@ pipeline {
     stage('Resolve') {
       steps {
         script {
-          // develop -> legacy repo + dev backend (unchanged).
-          // staging_aws -> namespaced repo + existing public backend.
-          // staging_ati -> namespaced repo + on-prem backend (node 41).
-          env.ECR_REPO      = (env.BRANCH_NAME == 'develop') ? 'oan-a2c-frontend' : 'oan/access-to-credit-system'
+          // All branches publish to the namespaced repo oan/access-to-credit-system now:
+          //   develop migrated off legacy oan-a2c-frontend (the Jenkins agent's ECR identity
+          //   can push oan/* but NOT oan-a2c-frontend -> the develop-latest push failed with
+          //   "no basic auth credentials"). deploy-dev.sh rewrites the dev VM .env from
+          //   ECR_REPO, so the VM repoints automatically. Backends still differ per branch:
+          //   develop -> dev backend; staging_aws -> public backend; staging_ati -> node 41.
+          env.ECR_REPO      = 'oan/access-to-credit-system'
           env.API_BASE_URL  = (env.BRANCH_NAME == 'staging_ati') ? env.STAGING_API_BASE_URL
                             : (env.BRANCH_NAME == 'staging_aws') ? env.AWS_STAGING_API_BASE_URL
                             : env.DEV_API_BASE_URL
