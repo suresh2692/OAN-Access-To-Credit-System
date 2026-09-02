@@ -57,8 +57,12 @@ pipeline {
           env.API_BASE_URL  = (env.BRANCH_NAME == 'staging_ati') ? env.STAGING_API_BASE_URL
                             : (env.BRANCH_NAME == 'staging_aws') ? env.AWS_STAGING_API_BASE_URL
                             : env.DEV_API_BASE_URL
-          env.IMMUTABLE_TAG = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
-          env.MOVING_TAG    = "${env.BRANCH_NAME}-latest"
+          // staging_ati publishes under a `staging-ati-` prefix (not the branch-derived
+          // `staging_ati-`) so the immutable tag reads staging-ati-<build>, uniform across
+          // all repos. develop/staging_aws keep their branch-name tag.
+          def tagPrefix     = (env.BRANCH_NAME == 'staging_ati') ? 'staging-ati' : env.BRANCH_NAME
+          env.IMMUTABLE_TAG = "${tagPrefix}-${env.BUILD_NUMBER}"
+          env.MOVING_TAG    = "${tagPrefix}-latest"
           echo "branch=${env.BRANCH_NAME}  repo=${env.ECR_REPO}  tag=${env.IMMUTABLE_TAG}  api=${env.API_BASE_URL}"
         }
       }
