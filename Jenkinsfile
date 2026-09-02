@@ -57,8 +57,15 @@ pipeline {
           env.API_BASE_URL  = (env.BRANCH_NAME == 'staging_ati') ? env.STAGING_API_BASE_URL
                             : (env.BRANCH_NAME == 'staging_aws') ? env.AWS_STAGING_API_BASE_URL
                             : env.DEV_API_BASE_URL
-          env.IMMUTABLE_TAG = "${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
-          env.MOVING_TAG    = "${env.BRANCH_NAME}-latest"
+          // staging_ati / staging_aws publish under hyphenated `staging-ati-` / `staging-aws-`
+          // prefixes (not the branch-derived `staging_ati-` / `staging_aws-`) so the immutable
+          // tags read staging-ati-<build> / staging-aws-<build>, uniform across all repos.
+          // develop keeps its branch-name tag.
+          def tagPrefix     = (env.BRANCH_NAME == 'staging_ati') ? 'staging-ati'
+                            : (env.BRANCH_NAME == 'staging_aws') ? 'staging-aws'
+                            : env.BRANCH_NAME
+          env.IMMUTABLE_TAG = "${tagPrefix}-${env.BUILD_NUMBER}"
+          env.MOVING_TAG    = "${tagPrefix}-latest"
           echo "branch=${env.BRANCH_NAME}  repo=${env.ECR_REPO}  tag=${env.IMMUTABLE_TAG}  api=${env.API_BASE_URL}"
         }
       }
@@ -204,6 +211,12 @@ SSHEOF
   }
 
   post {
+    // Bound the BuildKit cache so the shared agent's disk can't fill over many builds.
+    // `docker rmi` only drops the final tag; the build cache is a SEPARATE store that
+    // otherwise grows unbounded. --max-used-space caps it at ~20GB (buildx v0.34+; replaces
+    // the deprecated --keep-storage). Scoped to the build cache only — never
+    // `docker system prune`, which wipes other jobs on a shared agent.
+    always  { sh 'docker buildx prune -f --max-used-space=20GB 2>/dev/null || true' }
     success { echo "OK  ${env.BRANCH_NAME} #${env.BUILD_NUMBER} -> ${env.IMMUTABLE_TAG}" }
     failure { echo "FAIL ${env.BRANCH_NAME} #${env.BUILD_NUMBER}" }
   }
