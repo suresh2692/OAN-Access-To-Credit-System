@@ -181,6 +181,11 @@ ENVEOF
               sleep 15
               curl -sf http://localhost:3002 >/dev/null \
                 && echo "Health check passed (port 3002)" || echo "Warning: health check failed"
+
+              # Reclaim disk: each deploy pulls a fresh image; -a drops old tags no running
+              # container uses so the shared box doesn't fill up over deploys.
+              echo "=== Pruning unused images ==="
+              docker image prune -af || true
               echo "=== staging_aws frontend deployed on port 3002 ==="
               docker compose ps
 SSHEOF
